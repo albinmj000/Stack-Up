@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+stack_up.db
+stack_up.db-*
+temp_*.pdf
+
+frontend/node_modules/
+frontend/dist/

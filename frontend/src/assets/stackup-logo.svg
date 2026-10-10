@@ -1,0 +1,19 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 150" fill="none">
+  <defs>
+    <linearGradient id="mark" x1="8" y1="12" x2="132" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00F58A"/>
+      <stop offset="1" stop-color="#17B95F"/>
+    </linearGradient>
+    <linearGradient id="up" x1="385" y1="54" x2="570" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00F68B"/>
+      <stop offset="1" stop-color="#16C96D"/>
+    </linearGradient>
+  </defs>
+  <rect x="5" y="9" width="128" height="128" rx="31" stroke="url(#mark)" stroke-width="6"/>
+  <path d="M69 38C73 57 78 63 100 68C78 73 73 79 69 100C64 79 59 73 38 68C59 63 64 57 69 38Z" stroke="#8CF4B9" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M93 34C95 43 98 46 108 48C98 51 95 54 93 63C91 54 88 51 78 48C88 46 91 43 93 34Z" fill="#D5FFE5"/>
+  <path d="M42 98C44 104 47 107 53 109C47 111 44 114 42 120C40 114 37 111 31 109C37 107 40 104 42 98Z" fill="#8CF4B9"/>
+  <text x="160" y="101" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700" letter-spacing="-4" fill="#F8FAF9">stack</text>
+  <text x="407" y="101" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700" letter-spacing="-4" fill="url(#up)">up</text>
+  <text x="166" y="131" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="500" letter-spacing="8.5" fill="#EEF3F0">PERSONAL FINANCE</text>
+</svg>

@@ -1,0 +1,1830 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  LayoutDashboard,
+  ArrowLeftRight,
+  ChartNoAxesCombined,
+  Activity,
+  MessageCircle,
+  Upload,
+  Search,
+  ArrowUpRight,
+  ArrowDownRight,
+  Wallet,
+  PiggyBank,
+  Menu,
+  Sparkles,
+  CircleHelp,
+  History,
+  Download,
+  LogOut,
+} from "lucide-react";
+import stackUpLogo from "./assets/stackup-logo.svg";
+import "./App.css";
+
+const API = "/api";
+const CATEGORY_OPTIONS = [
+  "Food", "Transport", "Shopping", "Bills & Utilities",
+  "Entertainment", "Healthcare", "Loan / Credit", "Bank Charges",
+  "Cash Withdrawal", "Investment", "Income", "Interest Income", "Refund",
+  "Transfer", "UPI Sent", "UPI Received", "Other",
+];
+
+const navigation = [
+  { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Transactions", icon: ArrowLeftRight },
+  { label: "Transaction Trends", icon: Activity },
+  { label: "Analytics", icon: ChartNoAxesCombined },
+  { label: "AI Assistant", icon: MessageCircle },
+  { label: "Statement History", icon: History },
+];
+
+const money = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+}
+
+function getTransactionDateKey(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "Unknown date";
+
+  const yearFirst = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (yearFirst) {
+    return `${yearFirst[1]}-${yearFirst[2].padStart(2, "0")}-${yearFirst[3].padStart(2, "0")}`;
+  }
+
+  const dayFirst = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if (dayFirst) {
+    const year = dayFirst[3].length === 2 ? `20${dayFirst[3]}` : dayFirst[3];
+    return `${year}-${dayFirst[2].padStart(2, "0")}-${dayFirst[1].padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text;
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getAmount(transaction) {
+  const value = transaction.amount ?? transaction.transaction_amount ?? 0;
+  return Math.abs(Number(value) || 0);
+}
+
+function getTransactionType(transaction) {
+  const text = `${transaction.type ?? ""} ${transaction.transaction_type ?? ""} ${transaction.category ?? ""}`.toLowerCase();
+  if (text.includes("income") || text.includes("credit") || text.includes("deposit")) {
+    return "income";
+  }
+  return "expense";
+}
+
+function getAmountDirection(transaction) {
+  const direction = String(transaction.type ?? "").toLowerCase();
+  if (direction === "credit") return "income";
+  if (direction === "debit") return "expense";
+  return getTransactionType(transaction);
+}
+
+function getTransactionName(transaction) {
+  return (
+    transaction.description ??
+    transaction.merchant ??
+    transaction.name ??
+    transaction.narration ??
+    "Transaction"
+  );
+}
+
+function getTransactionCategory(transaction) {
+  return transaction.category ?? transaction.type ?? "Other";
+}
+
+function getAnalyticsCategory(transaction) {
+  const category = getTransactionCategory(transaction);
+  if (category === "Transfer" && /\bupi\b/i.test(transaction.description ?? "")) {
+    return String(transaction.type ?? "").toLowerCase() === "credit"
+      ? "UPI Received"
+      : "UPI Sent";
+  }
+  return category;
+}
+
+function getFollowUpQuestions(result, askedQuestion = "") {
+  if (Array.isArray(result.follow_up_questions) && result.follow_up_questions.length) {
+    return result.follow_up_questions;
+  }
+
+  const category = result.category ?? result.data?.category;
+  if (category) {
+    return [
+      `Show all ${category} transactions`,
+      `What is my total for ${category}?`,
+      "Where did I spend the most?",
+    ];
+  }
+
+  if (result.data?.highest_spending_category) {
+    return [
+      `Show all ${result.data.highest_spending_category} transactions`,
+      "How can I save more?",
+      "Summarize my statement",
+    ];
+  }
+
+  if (result.data?.category_totals) {
+    return [
+      "Where did I spend the most?",
+      "Show all Other transactions",
+      "How can I save more?",
+    ];
+  }
+
+  if (result.data?.total_income !== undefined) {
+    return [
+      "Show all Income transactions",
+      "What is my net cash flow?",
+      "What is my savings rate?",
+    ];
+  }
+
+  if (result.data?.total_expenses !== undefined) {
+    return [
+      "Where did I spend the most?",
+      "How can I save more?",
+      "Show all Other transactions",
+    ];
+  }
+
+  const question = askedQuestion.toLowerCase();
+  if (question.includes("balance")) {
+    return [
+      "What is my net cash flow?",
+      "Show all Income transactions",
+      "Show all Other transactions",
+    ];
+  }
+
+  return [
+    "Where did I spend the most?",
+    "How can I save more?",
+    "Summarize my statement",
+  ];
+}
+
+function AuthScreen({ onAuthenticated, initialNotice = "" }) {
+  const [mode, setMode] = useState("login");
+  const [stage, setStage] = useState("form");
+  const [useOtpLogin, setUseOtpLogin] = useState(false);
+  const [username, setUsername] = useState("");
+  const [contact, setContact] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState(initialNotice);
+
+  async function submitPasswordLogin(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ username, password }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not sign in.");
+      onAuthenticated(result.account);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendCode(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/auth/request-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contact,
+          create_account: mode === "create",
+          username: mode === "create" ? username : undefined,
+          password: mode === "create" ? password : undefined,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not send a code.");
+      setStage("verify");
+      setNotice(result.message || "Enter the verification code we sent you.");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyCode(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ contact, code }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not verify that code.");
+      onAuthenticated(result.account);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-screen">
+      <section className="auth-card">
+        <a className="brand auth-brand" href="#" onClick={(event) => event.preventDefault()}>
+          <img className="brand-image" src={stackUpLogo} alt="Stack Up Personal Finance" />
+        </a>
+        <h1>{mode === "login" ? "Welcome back." : "Create your account."}</h1>
+        <p className="auth-subtitle">{mode === "login" ? "Sign in with your username and password." : "Create login credentials and verify your email or phone."}</p>
+        {stage === "form" && notice && <p className="auth-notice" role="status">{notice}</p>}
+
+        {stage === "form" ? (
+          <>
+            <div className="auth-mode-switch">
+              <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setUseOtpLogin(false); setError(""); }}>Sign in</button>
+              <button type="button" className={mode === "create" ? "active" : ""} onClick={() => { setMode("create"); setUseOtpLogin(false); setError(""); }}>Create account</button>
+            </div>
+            {mode === "login" && !useOtpLogin ? (
+              <form className="auth-form" onSubmit={submitPasswordLogin}>
+                <label htmlFor="auth-username">Username</label>
+                <input id="auth-username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Your username" required />
+                <label htmlFor="auth-password">Password</label>
+                <input id="auth-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" required />
+                <button className="primary-button auth-submit" type="submit" disabled={busy}>
+                  {busy ? "Signing in..." : "Sign in"}
+                </button>
+                <button className="auth-back-button" type="button" onClick={() => setUseOtpLogin(true)}>Sign in with an email or phone code</button>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={sendCode}>
+                {mode === "create" && <>
+                  <label htmlFor="auth-username">Username</label>
+                  <input id="auth-username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="3–24 letters, numbers, . _ or -" minLength={3} maxLength={24} required />
+                  <label htmlFor="auth-password">Create password</label>
+                  <input id="auth-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} maxLength={128} required />
+                </>}
+                <label htmlFor="auth-contact">{mode === "create" ? "Email or phone for verification" : "Email or phone number"}</label>
+                <input id="auth-contact" autoComplete="email" value={contact} onChange={(event) => setContact(event.target.value)} placeholder="you@example.com or +91 98765 43210" required />
+                <button className="primary-button auth-submit" type="submit" disabled={busy}>
+                  {busy ? "Sending code..." : mode === "create" ? "Verify email or phone" : "Send sign-in code"}
+                </button>
+                {mode === "login" && <button className="auth-back-button" type="button" onClick={() => setUseOtpLogin(false)}>Back to username and password</button>}
+              </form>
+            )}
+          </>
+        ) : (
+          <form className="auth-form" onSubmit={verifyCode}>
+            <p className="auth-notice">{notice}</p>
+            <label htmlFor="auth-code">6-digit verification code</label>
+            <input
+              id="auth-code"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}
+              placeholder="123456"
+              required
+            />
+            <button className="primary-button auth-submit" type="submit" disabled={busy || code.length !== 6}>
+              {busy ? "Verifying..." : "Verify and continue"}
+            </button>
+            <button className="auth-back-button" type="button" onClick={() => { setStage("form"); setNotice(""); setCode(""); }}>
+              Back to account details
+            </button>
+          </form>
+        )}
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <p className="auth-privacy">Usernames and verified email addresses or phone numbers must be unique. Passwords are stored securely.</p>
+      </section>
+    </main>
+  );
+}
+
+function App() {
+  const [activePage, setActivePage] = useState("Dashboard");
+  const [account, setAccount] = useState(null);
+  const [rememberedAccounts, setRememberedAccounts] = useState([]);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [accountSwitching, setAccountSwitching] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [question, setQuestion] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [statements, setStatements] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedMetric, setSelectedMetric] = useState(null);
+  const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const chatInputRef = useRef(null);
+
+  async function refreshStatementHistory() {
+    const response = await fetch(`${API}/statements`, { credentials: "include" });
+    if (!response.ok) throw new Error("Could not load statement history.");
+    const result = await response.json();
+    setStatements(Array.isArray(result.statements) ? result.statements : []);
+    return Array.isArray(result.statements) ? result.statements : [];
+  }
+
+  async function loadSavedStatement(statementId) {
+    const response = await fetch(`${API}/statements/${statementId}`, { credentials: "include" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not load this statement.");
+    setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
+    setAnalysis(result.analysis ?? null);
+    setActivePage("Dashboard");
+    setNotice(`${result.filename || "Statement"} loaded from history.`);
+    setError("");
+  }
+
+  async function finishSignIn(nextAccount) {
+    setAccount(nextAccount);
+    setAuthNotice("");
+    setAuthLoading(true);
+    try {
+      const accountsResponse = await fetch(`${API}/auth/accounts`, { credentials: "include" });
+      if (accountsResponse.ok) {
+        const accountsResult = await accountsResponse.json();
+        setRememberedAccounts(Array.isArray(accountsResult.accounts) ? accountsResult.accounts : []);
+      }
+      const history = await refreshStatementHistory();
+      if (history.length > 0) await loadSavedStatement(history[0].statement_id);
+      else {
+        setTransactions([]);
+        setAnalysis(null);
+        setActivePage("Dashboard");
+      }
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" });
+    } finally {
+      setAccount(null);
+      setRememberedAccounts([]);
+      setTransactions([]);
+      setStatements([]);
+      setAnalysis(null);
+      setMessages([]);
+      setQuestion("");
+      setSelectedCategory(null);
+      setSelectedMetric(null);
+      setNotice("");
+      setError("");
+      setActivePage("Dashboard");
+    }
+  }
+
+  async function switchAccount(userId) {
+    if (!userId || accountSwitching) return;
+    setAccountSwitching(true);
+    setError("");
+    setMessages([]);
+    setQuestion("");
+    setSelectedCategory(null);
+    setSelectedMetric(null);
+    setSelectedTimelineDate(null);
+    setNotice("");
+    try {
+      const response = await fetch(`${API}/auth/switch-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not switch accounts.");
+      await finishSignIn(result.account);
+    } catch (switchError) {
+      setError(switchError.message);
+    } finally {
+      setAccountSwitching(false);
+    }
+  }
+
+  async function addAccount() {
+    setError("");
+    try {
+      const response = await fetch(`${API}/auth/add-account`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not add another account.");
+      setAccount(null);
+      setTransactions([]);
+      setStatements([]);
+      setAnalysis(null);
+      setMessages([]);
+      setQuestion("");
+      setSelectedCategory(null);
+      setSelectedMetric(null);
+      setSelectedTimelineDate(null);
+      setNotice("");
+      setRememberedAccounts([]);
+      setAuthNotice("Sign in to add another account to this device. Your current account will stay remembered.");
+    } catch (addError) {
+      setError(addError.message);
+    }
+  }
+
+  useEffect(() => {
+    async function restoreSession() {
+      try {
+        const response = await fetch(`${API}/auth/me`, { credentials: "include" });
+        if (!response.ok) return;
+        const profile = await response.json();
+        setAccount(profile);
+        const accountsResponse = await fetch(`${API}/auth/accounts`, { credentials: "include" });
+        if (accountsResponse.ok) {
+          const accountsResult = await accountsResponse.json();
+          setRememberedAccounts(Array.isArray(accountsResult.accounts) ? accountsResult.accounts : []);
+        }
+        const historyResponse = await fetch(`${API}/statements`, { credentials: "include" });
+        if (!historyResponse.ok) return;
+        const historyResult = await historyResponse.json();
+        const history = Array.isArray(historyResult.statements) ? historyResult.statements : [];
+        setStatements(history);
+        if (history.length > 0) {
+          const statementResponse = await fetch(
+            `${API}/statements/${history[0].statement_id}`,
+            { credentials: "include" }
+          );
+          if (statementResponse.ok) {
+            const statementResult = await statementResponse.json();
+            setTransactions(statementResult.transactions ?? []);
+            setAnalysis(statementResult.analysis ?? null);
+          }
+        }
+      } catch (restoreError) {
+        console.error("Could not restore Stack Up session.", restoreError);
+      } finally {
+        setAuthLoading(false);
+      }
+    }
+    restoreSession();
+  }, []);
+
+  useEffect(() => {
+    if (activePage === "AI Assistant") {
+      chatInputRef.current?.focus();
+    }
+  }, [activePage]);
+
+  function openAssistant() {
+    setActivePage("AI Assistant");
+    setMobileMenu(false);
+  }
+
+  function openMetric(metric) {
+    setSelectedMetric(metric);
+    setSelectedCategory(null);
+    setActivePage("Analytics");
+  }
+
+  async function updateCategory(transaction, category) {
+    setError("");
+    try {
+      const response = await fetch(
+        `${API}/transactions/${transaction.id}/category`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ category }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok || result.status !== "success") {
+        throw new Error(result.message || "Could not update this category.");
+      }
+      setTransactions((previous) => previous.map((item) =>
+        item.id === transaction.id
+          ? { ...item, category, transaction_type: result.transaction_type }
+          : item
+      ));
+      setAnalysis(result.analysis);
+      setNotice(`Category saved as ${category}.`);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function uploadStatement(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Please select a PDF bank statement.");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+    setNotice("Uploading and analyzing your statement...");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(
+        `${API}/upload-statement?reprocess=true`,
+        {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || "Upload failed.");
+      }
+
+      if (result.status === "duplicate") {
+        setNotice(result.message || "This statement was already uploaded.");
+        return;
+      }
+
+      if (result.status !== "success") {
+        throw new Error(result.message || result.error || "Unable to analyze this PDF.");
+      }
+
+      setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
+      setAnalysis(result.analysis ?? null);
+      try {
+        await refreshStatementHistory();
+      } catch (historyError) {
+        console.error("Statement uploaded but history refresh failed.", historyError);
+      }
+      setNotice(
+        `Statement analyzed successfully! ${result.transaction_count ?? result.transactions?.length ?? 0} transactions processed.`
+      );
+      setActivePage("Dashboard");
+    } catch (err) {
+      setError(
+        `${err.message}. Check that the backend is running at ${API}.`
+      );
+      setNotice("");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function askQuestion(text) {
+    if (!text || asking) return;
+
+    setMessages((previous) => [...previous, { role: "user", text }]);
+    setQuestion("");
+    setAsking(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams({
+        message: text,
+      });
+
+      const response = await fetch(`${API}/message?${params.toString()}`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || "The assistant request failed.");
+      }
+
+      const reply =
+        result.message ??
+        result.response ??
+        result.answer ??
+        (typeof result === "string" ? result : JSON.stringify(result, null, 2));
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          text: String(reply),
+          category: result.category,
+          transactions: Array.isArray(result.transactions) ? result.transactions : null,
+          suggestions: Array.isArray(result.suggestions) ? result.suggestions : null,
+          followUps: getFollowUpQuestions(result, text),
+        },
+      ]);
+    } catch (err) {
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          text: `I couldn't connect to the assistant. ${err.message}`,
+        },
+      ]);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  function sendQuestion(event) {
+    event.preventDefault();
+    askQuestion(question.trim());
+  }
+
+  const totalIncome = Number(analysis?.total_income ?? 0);
+  const totalExpenses = Number(analysis?.total_expenses ?? 0);
+  const netCashFlow = Number(
+    analysis?.net_cash_flow ?? totalIncome - totalExpenses
+  );
+  const savingsRate = Number(
+    analysis?.savings_rate ??
+      (totalIncome > 0 ? (netCashFlow / totalIncome) * 100 : 0)
+  );
+
+  const hasRealData = Boolean(analysis);
+  const recentTransactions = transactions.slice(-5).reverse();
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
+  const filteredTransactions = normalizedSearch
+    ? transactions.filter((transaction) => {
+        const searchableText = [
+          getTransactionName(transaction),
+          getTransactionCategory(transaction),
+          transaction.description,
+          transaction.merchant,
+          transaction.narration,
+          transaction.type,
+          transaction.transaction_type,
+          transaction.date,
+          transaction.transaction_date,
+          formatDate(transaction.date ?? transaction.transaction_date),
+          getAmount(transaction),
+          money(getAmount(transaction)),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase();
+        return searchableText.includes(normalizedSearch);
+      })
+    : transactions;
+
+  const timelineByDate = new Map();
+  transactions.forEach((transaction) => {
+    const dateKey = getTransactionDateKey(
+      transaction.date ?? transaction.transaction_date
+    );
+    const daily = timelineByDate.get(dateKey) ?? {
+      dateKey,
+      income: 0,
+      expenses: 0,
+      count: 0,
+    };
+    const amount = getAmount(transaction);
+    if (getAmountDirection(transaction) === "income") daily.income += amount;
+    else daily.expenses += amount;
+    daily.count += 1;
+    timelineByDate.set(dateKey, daily);
+  });
+  const transactionTimeline = [...timelineByDate.values()].sort((a, b) => {
+    if (a.dateKey === "Unknown date") return 1;
+    if (b.dateKey === "Unknown date") return -1;
+    return a.dateKey.localeCompare(b.dateKey);
+  });
+  const maxDailyAmount = Math.max(
+    0,
+    ...transactionTimeline.flatMap((day) => [day.income, day.expenses])
+  );
+  const timelineIncome = transactionTimeline.reduce((sum, day) => sum + day.income, 0);
+  const timelineExpenses = transactionTimeline.reduce((sum, day) => sum + day.expenses, 0);
+  const dateSortedTransactions = [...transactions].sort((a, b) => {
+    const dateA = getTransactionDateKey(a.date ?? a.transaction_date);
+    const dateB = getTransactionDateKey(b.date ?? b.transaction_date);
+    if (dateA === "Unknown date") return 1;
+    if (dateB === "Unknown date") return -1;
+    return dateB.localeCompare(dateA);
+  });
+  const selectedTimelineDay = transactionTimeline.find(
+    (day) => day.dateKey === selectedTimelineDate
+  );
+  const selectedDateTransactions = selectedTimelineDay
+    ? transactions.filter((transaction) =>
+        getTransactionDateKey(transaction.date ?? transaction.transaction_date) === selectedTimelineDate
+      )
+    : [];
+
+  const spendingEntries = Object.entries(analysis?.category_totals ?? {})
+    .filter(([category]) => !/income|salary|credit|deposit/i.test(category))
+    .map(([label, amount]) => ({
+      label,
+      amount: Math.abs(Number(amount) || 0),
+    }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+
+  const categoryOverview = transactions.reduce((categories, transaction) => {
+    const label = getAnalyticsCategory(transaction);
+    const category = categories.get(label) ?? { label, amount: 0, count: 0 };
+    category.amount += getAmount(transaction);
+    category.count += 1;
+    categories.set(label, category);
+    return categories;
+  }, new Map());
+  // Keep these useful buckets visible even when the current statement has no
+  // matching rows yet, so users can still open them and see an empty state.
+  ["Other", "UPI Sent", "UPI Received"].forEach((label) => {
+    if (!categoryOverview.has(label)) {
+      categoryOverview.set(label, { label, amount: 0, count: 0 });
+    }
+  });
+  const allCategoryEntries = [...categoryOverview.values()]
+    .sort((a, b) => b.amount - a.amount);
+  const allCategoryTotal = allCategoryEntries.reduce((sum, item) => sum + item.amount, 0);
+
+  const selectedCategoryTransactions = selectedCategory
+    ? transactions.filter((transaction) =>
+        getAnalyticsCategory(transaction) === selectedCategory
+      )
+    : [];
+
+  const incomeTransactions = transactions.filter(
+    (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "income"
+  );
+  const expenseTransactions = transactions.filter(
+    (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "expense"
+  );
+  const selectedMetricTransactions = selectedMetric === "total_income"
+    ? incomeTransactions
+    : selectedMetric === "total_expenses"
+      ? expenseTransactions
+      : [...incomeTransactions, ...expenseTransactions].sort(
+          (a, b) => (b.id ?? 0) - (a.id ?? 0)
+        );
+
+  const metricDetails = {
+    net_cash_flow: {
+      title: "Net cash flow",
+      value: money(netCashFlow),
+      formula: `${money(totalIncome)} total income - ${money(totalExpenses)} total expenses = ${money(netCashFlow)}`,
+      explanation: `Calculated from ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expense transactions. Transfers and unknown transactions are excluded.`,
+    },
+    total_income: {
+      title: "Total income",
+      value: money(totalIncome),
+      formula: `Sum of ${incomeTransactions.length} transactions marked as income = ${money(totalIncome)}`,
+      explanation: "Only transactions classified as income are included. Transfers are excluded.",
+    },
+    total_expenses: {
+      title: "Total expenses",
+      value: money(totalExpenses),
+      formula: `Sum of ${expenseTransactions.length} transactions marked as expenses = ${money(totalExpenses)}`,
+      explanation: "Only transactions classified as expenses are included. Transfers are excluded.",
+    },
+    savings_rate: {
+      title: "Savings rate",
+      value: `${savingsRate.toFixed(1)}%`,
+      formula: totalIncome > 0
+        ? `(${money(totalIncome)} income - ${money(totalExpenses)} expenses) / ${money(totalIncome)} income = ${savingsRate.toFixed(1)}%`
+        : "Savings rate is 0% because there is no income recorded.",
+      explanation: `Uses ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expense transactions. Transfers and unknown transactions are excluded.`,
+    },
+  };
+  const metricDetail = selectedMetric ? metricDetails[selectedMetric] : null;
+
+  const spendingTotal = spendingEntries.reduce(
+    (sum, item) => sum + item.amount,
+    0
+  );
+
+  const accountLabel = account?.username || account?.email || account?.phone || "Personal account";
+
+  if (authLoading) {
+    return <main className="auth-screen"><div className="auth-loading">Loading your account...</div></main>;
+  }
+
+  if (!account) {
+    return <AuthScreen onAuthenticated={finishSignIn} initialNotice={authNotice} />;
+  }
+
+  return (
+    <div className="app-layout">
+      <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
+        <a
+          className="brand"
+          href="#"
+          onClick={(event) => {
+            event.preventDefault();
+            setActivePage("Dashboard");
+            setMobileMenu(false);
+          }}
+        >
+          <img className="brand-image" src={stackUpLogo} alt="Stack Up Personal Finance" />
+        </a>
+
+        <div className="workspace-label">SERVICES</div>
+
+        <nav className="navigation">
+          {navigation.map(({ label, icon: Icon }) => (
+            <button
+              key={label}
+              className={`nav-item ${activePage === label ? "nav-active" : ""}`}
+              onClick={() => {
+                if (label === "AI Assistant") {
+                  openAssistant();
+                } else {
+                  if (label === "Analytics") {
+                    setSelectedMetric(null);
+                    setSelectedCategory(null);
+                  }
+                  setActivePage(label);
+                }
+                setMobileMenu(false);
+              }}
+            >
+              <Icon size={19} strokeWidth={1.8} />
+              <span>{label}</span>
+              {label === "AI Assistant" && <span className="ai-dot" />}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="upgrade-card">
+            <span className="upgrade-icon"><Sparkles size={18} /></span>
+            <strong>Your money, smarter.</strong>
+            <p>Understand your spending and make every rupee count.</p>
+            <button onClick={openAssistant}>
+              Explore AI <ArrowUpRight size={15} />
+            </button>
+          </div>
+
+          <details className="sidebar-account-menu">
+            <summary className="profile" aria-label="Open account options">
+              <div className="avatar">{accountLabel.slice(0, 1).toUpperCase()}</div>
+              <div className="profile-text">
+                <strong>{accountLabel}</strong>
+                <span>Personal account</span>
+              </div>
+              <span className="online-dot" />
+            </summary>
+            <div className="sidebar-account-dropdown">
+              <span className="sidebar-account-label">ACCOUNTS ON THIS DEVICE</span>
+              <div className="remembered-account-list">
+                {rememberedAccounts.map((savedAccount) => {
+                  const label = savedAccount.username || savedAccount.email || savedAccount.phone || "Personal account";
+                  return savedAccount.active ? (
+                    <div className="remembered-account current" key={savedAccount.user_id}>
+                      <span>{label}</span>
+                      <small>Current</small>
+                    </div>
+                  ) : (
+                    <button
+                      className="remembered-account"
+                      type="button"
+                      key={savedAccount.user_id}
+                      disabled={accountSwitching}
+                      onClick={() => switchAccount(savedAccount.user_id)}
+                    >
+                      <span>{label}</span>
+                      <small>{accountSwitching ? "Switching..." : "Switch"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="add-remembered-account" type="button" onClick={addAccount}>
+                <ArrowLeftRight size={15} />
+                <span>Add another account</span>
+              </button>
+            </div>
+          </details>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="topbar">
+          <button
+            className="icon-button mobile-menu-button"
+            onClick={() => setMobileMenu(!mobileMenu)}
+            aria-label="Toggle menu"
+          >
+            <Menu size={21} />
+          </button>
+
+          <div className="breadcrumb">
+            Workspace <span>/</span> <strong>{activePage}</strong>
+          </div>
+
+          <div className="topbar-actions">
+            <div className="search-box">
+              <Search size={17} />
+              <input
+                placeholder="Search transactions..."
+                aria-label="Search transactions"
+                value={searchQuery}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSearchQuery(value);
+                  if (value.trim()) setActivePage("Transactions");
+                }}
+              />
+            </div>
+            <details className="account-menu">
+              <summary className="account-chip" title="Account options">
+                <span className="account-chip-initial" aria-hidden="true">
+                  {accountLabel.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="account-chip-name">{accountLabel}</span>
+              </summary>
+              <div className="account-dropdown">
+                <span className="account-dropdown-label">Signed in as</span>
+                <strong className="account-dropdown-name">{accountLabel}</strong>
+                <button className="account-logout" onClick={signOut}>
+                  <LogOut size={16} />
+                  <span>Log out</span>
+                </button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        <div className="page-container">
+          {notice && (
+            <div className="notice-message" role="status">
+              {notice}
+              <button onClick={() => setNotice("")} aria-label="Dismiss">×</button>
+            </div>
+          )}
+
+          {error && (
+            <div className="error-message" role="alert">
+              {error}
+              <button onClick={() => setError("")} aria-label="Dismiss">×</button>
+            </div>
+          )}
+
+          {activePage === "Dashboard" && (
+            <>
+              <section className="welcome-row">
+                <div>
+                  <div className="eyebrow">
+                    <span className="live-dot" /> YOUR FINANCIAL OVERVIEW
+                  </div>
+                  <h1>Your money, <span>in focus.</span></h1>
+                  <p className="page-subtitle">
+                    {hasRealData
+                      ? "Your uploaded statement analysis."
+                      : "Upload a bank statement to see your financial overview."}
+                  </p>
+                </div>
+
+                <label className={`upload-button ${uploading ? "uploading" : ""}`}>
+                  <Upload size={17} />
+                  {uploading ? "Analyzing..." : "Upload statement"}
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    disabled={uploading}
+                    onChange={uploadStatement}
+                  />
+                </label>
+              </section>
+
+              <section className="stat-grid">
+                <button className="stat-card balance-card metric-card" onClick={() => openMetric("net_cash_flow")}>
+                  <div className="stat-heading">
+                    <span>Net cash flow</span>
+                    <span className="stat-icon"><Wallet size={19} /></span>
+                  </div>
+                  <div className="stat-value">
+                    {hasRealData ? money(netCashFlow) : "—"}
+                  </div>
+                  <div className="stat-foot">
+                    <span>{hasRealData ? "From statement" : "Upload a statement"}</span>
+                  </div>
+                  <div className="balance-decoration">
+                    <i /><i /><i /><i /><i /><i /><i />
+                  </div>
+                </button>
+
+                <button className="stat-card metric-card" onClick={() => openMetric("total_income")}>
+                  <div className="stat-heading">
+                    <span>Total income</span>
+                    <span className="stat-icon green-icon"><ArrowDownRight size={19} /></span>
+                  </div>
+                  <div className="stat-value">
+                    {hasRealData ? money(totalIncome) : "—"}
+                  </div>
+                  <div className="stat-foot">
+                    <span>{hasRealData ? "Analyzed credits" : "Awaiting data"}</span>
+                  </div>
+                  <div className="mini-bars income-bars">
+                    <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
+                  </div>
+                </button>
+
+                <button className="stat-card metric-card" onClick={() => openMetric("total_expenses")}>
+                  <div className="stat-heading">
+                    <span>Total expenses</span>
+                    <span className="stat-icon orange-icon"><ArrowUpRight size={19} /></span>
+                  </div>
+                  <div className="stat-value">
+                    {hasRealData ? money(totalExpenses) : "—"}
+                  </div>
+                  <div className="stat-foot">
+                    <span>{hasRealData ? "Analyzed debits" : "Awaiting data"}</span>
+                  </div>
+                  <div className="mini-bars expense-bars">
+                    <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
+                  </div>
+                </button>
+
+                <button className="stat-card metric-card" onClick={() => openMetric("savings_rate")}>
+                  <div className="stat-heading">
+                    <span>Savings rate</span>
+                    <span className="stat-icon purple-icon"><PiggyBank size={19} /></span>
+                  </div>
+                  <div className="stat-value">
+                    {hasRealData ? `${savingsRate.toFixed(1)}%` : "—"}
+                  </div>
+                  <div className="stat-foot">
+                    <span>{hasRealData ? "Calculated from analysis" : "Awaiting data"}</span>
+                  </div>
+                  <div className="savings-track">
+                    <span style={{ width: `${Math.min(100, Math.max(0, savingsRate))}%` }} />
+                  </div>
+                </button>
+              </section>
+
+              <section className="content-grid">
+                <article className="panel cashflow-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Statement overview</h2>
+                      <p>Summary of your uploaded transactions</p>
+                    </div>
+                  </div>
+
+                  {hasRealData ? (
+                    <div className="statement-summary">
+                      <div>
+                        <span>Transactions analyzed</span>
+                        <strong>{transactions.length}</strong>
+                      </div>
+                      <div>
+                        <span>Net cash flow</span>
+                        <strong>{money(netCashFlow)}</strong>
+                      </div>
+                      <div>
+                        <span>Income minus expenses</span>
+                        <strong>{money(totalIncome - totalExpenses)}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <Upload size={28} />
+                      <h3>Your statement goes here</h3>
+                      <p>Upload a PDF statement to calculate your income, expenses and savings.</p>
+                    </div>
+                  )}
+
+                  <p className="demo-note">
+                    Financial figures appear here after successful statement analysis.
+                  </p>
+                </article>
+
+                <article className="panel spending-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Spending breakdown</h2>
+                      <p>Categories returned by your analysis</p>
+                    </div>
+                    <button className="text-button" onClick={() => {
+                      setSelectedCategory(null);
+                      setActivePage("Analytics");
+                    }}>
+                      Details <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+
+                  <div className="spending-total">
+                    <strong>{hasRealData ? money(spendingTotal) : "—"}</strong>
+                    <span>Listed categories</span>
+                  </div>
+
+                  {spendingEntries.length > 0 ? (
+                    <div className="spending-list">
+                      {spendingEntries.map((item, index) => (
+                        <div className="spending-item" key={item.label}>
+                          <div className="spending-item-heading">
+                            <span>
+                              <i className={`category-dot category-${index % 4}`} />
+                              {item.label}
+                            </span>
+                            <strong>{money(item.amount)}</strong>
+                          </div>
+                          <div className="spending-track">
+                            <span
+                              className={`category-fill fill-${index % 4}`}
+                              style={{
+                                width: `${spendingTotal > 0 ? (item.amount / spendingTotal) * 100 : 0}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <Sparkles size={24} />
+                      <p>Upload a statement to see spending categories.</p>
+                    </div>
+                  )}
+
+                  <div className="insight-card">
+                    <Sparkles size={18} />
+                    <div>
+                      <strong>A smarter money habit</strong>
+                      <p>Review your spending categories to identify possible savings.</p>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <section className="panel transactions-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Recent transactions</h2>
+                    <p>Your latest analyzed money movements</p>
+                  </div>
+                  <button className="text-button" onClick={() => setActivePage("Transactions")}>
+                    View all <ArrowUpRight size={14} />
+                  </button>
+                </div>
+
+                {recentTransactions.length > 0 ? (
+                  <div className="transaction-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>TRANSACTION</th>
+                          <th>CATEGORY</th>
+                          <th>DATE</th>
+                          <th className="amount-column">AMOUNT</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentTransactions.map((transaction, index) => {
+                          const type = getTransactionType(transaction);
+                          const amountDirection = getAmountDirection(transaction);
+                          return (
+                            <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
+                              <td>
+                                <div className="transaction-name">
+                                  <span className={`transaction-symbol ${type}`}>
+                                    {type === "income" ? "↗" : "₹"}
+                                  </span>
+                                  <strong>{getTransactionName(transaction)}</strong>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="category-pill">
+                                  {getTransactionCategory(transaction)}
+                                </span>
+                              </td>
+                              <td className="date-cell">
+                                {formatDate(transaction.date ?? transaction.transaction_date)}
+                              </td>
+                              <td className={`amount-cell ${amountDirection}`}>
+                                {amountDirection === "income" ? "+" : "−"}
+                                {money(getAmount(transaction))}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>No transactions loaded yet. Upload your bank statement to begin.</p>
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+
+          {activePage === "Transaction Trends" && (
+            <>
+              <section className="analytics-heading trends-heading">
+                <div>
+                  <div className="eyebrow"><span className="live-dot" /> TRANSACTION TIMELINE</div>
+                  <h1>Your money, <span>over time.</span></h1>
+                  <p className="page-subtitle">Daily income and spending across every transaction in your statement.</p>
+                </div>
+                <button className="secondary-button" onClick={() => setActivePage("Dashboard")}>
+                  <LayoutDashboard size={16} /> Back to dashboard
+                </button>
+              </section>
+
+              {transactions.length > 0 ? (
+                <>
+                  <section className="analytics-totals trends-totals">
+                    <article><span>Transactions</span><strong>{transactions.length}</strong></article>
+                    <article><span>Total credits</span><strong className="trend-income-text">{money(timelineIncome)}</strong></article>
+                    <article><span>Total debits</span><strong className="trend-expense-text">{money(timelineExpenses)}</strong></article>
+                  </section>
+
+                  <section className="panel timeline-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>Daily cash movement</h2>
+                        <p>Each bar shows the total amount on that date. Hover or tap a bar for details.</p>
+                      </div>
+                    </div>
+                    <div className="chart-legend timeline-legend">
+                      <span><i className="legend-income" /> Credits</span>
+                      <span><i className="legend-expense" /> Debits</span>
+                    </div>
+                    <div className="timeline-chart-scroll">
+                      <div
+                        className="timeline-chart"
+                        style={{ minWidth: `${Math.max(620, transactionTimeline.length * 78)}px` }}
+                      >
+                        <div className="timeline-axis-labels" aria-hidden="true">
+                          <span>{money(maxDailyAmount)}</span>
+                          <span>{money(maxDailyAmount / 2)}</span>
+                          <span>₹0</span>
+                        </div>
+                        <div className="timeline-plot">
+                          <div className="timeline-gridline timeline-gridline-top" />
+                          <div className="timeline-gridline timeline-gridline-middle" />
+                          <div className="timeline-gridline timeline-gridline-bottom" />
+                          <div className="timeline-columns">
+                            {transactionTimeline.map((day) => (
+                              <button
+                                className={`timeline-day ${selectedTimelineDate === day.dateKey ? "timeline-day-selected" : ""}`}
+                                key={day.dateKey}
+                                onClick={() => setSelectedTimelineDate(day.dateKey)}
+                                aria-label={`${formatDate(day.dateKey)}: ${day.count} transactions, credits ${money(day.income)}, debits ${money(day.expenses)}. Show day's transactions.`}
+                                title={`${formatDate(day.dateKey)} · ${day.count} transactions · Credits ${money(day.income)} · Debits ${money(day.expenses)}`}
+                              >
+                                <div className="timeline-bars">
+                                  <span
+                                    className="timeline-bar timeline-income-bar"
+                                    style={{ height: `${day.income > 0 && maxDailyAmount ? Math.max(2, (day.income / maxDailyAmount) * 100) : 0}%` }}
+                                  />
+                                  <span
+                                    className="timeline-bar timeline-expense-bar"
+                                    style={{ height: `${day.expenses > 0 && maxDailyAmount ? Math.max(2, (day.expenses / maxDailyAmount) * 100) : 0}%` }}
+                                  />
+                                </div>
+                                <span className="timeline-date">{day.dateKey === "Unknown date" ? "Unknown" : formatDate(day.dateKey)}</span>
+                                <span className="timeline-count">{day.count} {day.count === 1 ? "txn" : "txns"}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {selectedTimelineDay && (
+                      <div className="timeline-detail">
+                        <div className="timeline-detail-heading">
+                          <div>
+                            <span>DAY DETAILS</span>
+                            <h3>{selectedTimelineDate === "Unknown date" ? "Undated transactions" : formatDate(selectedTimelineDate)}</h3>
+                          </div>
+                          <button className="text-button" onClick={() => setSelectedTimelineDate(null)}>Clear selection</button>
+                        </div>
+                        <div className="timeline-day-stats">
+                          <div><span>Transactions</span><strong>{selectedTimelineDay.count}</strong></div>
+                          <div><span>Credits</span><strong className="trend-income-text">{money(selectedTimelineDay.income)}</strong></div>
+                          <div><span>Debits</span><strong className="trend-expense-text">{money(selectedTimelineDay.expenses)}</strong></div>
+                          <div><span>Net movement</span><strong className={selectedTimelineDay.income - selectedTimelineDay.expenses >= 0 ? "trend-income-text" : "trend-expense-text"}>{money(selectedTimelineDay.income - selectedTimelineDay.expenses)}</strong></div>
+                        </div>
+                        <div className="transaction-table-wrap timeline-selected-table">
+                          <table>
+                            <thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>TYPE</th><th className="amount-column">AMOUNT</th></tr></thead>
+                            <tbody>
+                              {selectedDateTransactions.map((transaction, index) => {
+                                const direction = getAmountDirection(transaction);
+                                return (
+                                  <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
+                                    <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
+                                    <td><span className="category-pill">{getTransactionCategory(transaction)}</span></td>
+                                    <td className="date-cell">{direction === "income" ? "Credit" : "Debit"}</td>
+                                    <td className={`amount-cell ${direction}`}>{direction === "income" ? "+" : "−"}{money(getAmount(transaction))}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="panel transactions-panel full-panel timeline-transactions-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>All transactions by date</h2>
+                        <p>{transactions.length} transactions, newest date first.</p>
+                      </div>
+                    </div>
+                    <div className="transaction-table-wrap">
+                      <table>
+                        <thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>DATE</th><th className="amount-column">AMOUNT</th></tr></thead>
+                        <tbody>
+                          {dateSortedTransactions.map((transaction, index) => {
+                            const direction = getAmountDirection(transaction);
+                            return (
+                              <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
+                                <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
+                                <td><span className="category-pill">{getTransactionCategory(transaction)}</span></td>
+                                <td className="date-cell">{formatDate(transaction.date ?? transaction.transaction_date)}</td>
+                                <td className={`amount-cell ${direction}`}>{direction === "income" ? "+" : "−"}{money(getAmount(transaction))}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <section className="panel empty-category-detail">
+                  <Activity size={26} />
+                  <p>Upload a statement to see your transaction timeline.</p>
+                  <button className="primary-button" onClick={() => setActivePage("Dashboard")}>
+                    <Upload size={16} /> Go to dashboard
+                  </button>
+                </section>
+              )}
+            </>
+          )}
+
+          {activePage === "Transactions" && (
+            <section className="panel transactions-panel full-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Transactions</h2>
+                  <p>
+                    {normalizedSearch
+                      ? `Showing ${filteredTransactions.length} of ${transactions.length} matching transactions.`
+                      : `${transactions.length} transactions loaded. Select a category to correct it; your UPI choices are remembered for next time.`}
+                  </p>
+                </div>
+                <label className="upload-button">
+                  <Upload size={17} /> Upload statement
+                  <input type="file" accept=".pdf,application/pdf" disabled={uploading} onChange={uploadStatement} />
+                </label>
+              </div>
+
+              {filteredTransactions.length > 0 ? (
+                <div className="transaction-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>TRANSACTION</th>
+                        <th>CATEGORY</th>
+                        <th>DATE</th>
+                        <th className="amount-column">AMOUNT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTransactions.map((transaction, index) => {
+                        const type = getTransactionType(transaction);
+                        const amountDirection = getAmountDirection(transaction);
+                        return (
+                          <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
+                            <td>
+                              <div className="transaction-name">
+                                <span className={`transaction-symbol ${type}`}>
+                                  {type === "income" ? "↗" : "₹"}
+                                </span>
+                                <strong>{getTransactionName(transaction)}</strong>
+                              </div>
+                            </td>
+                            <td>
+                              <label className="category-editor">
+                                <span className="sr-only">Choose category for {getTransactionName(transaction)}</span>
+                                <select
+                                  value={getTransactionCategory(transaction)}
+                                  onChange={(event) => updateCategory(transaction, event.target.value)}
+                                  aria-label={`Category for ${getTransactionName(transaction)}`}
+                                >
+                                  {!CATEGORY_OPTIONS.includes(getTransactionCategory(transaction)) && (
+                                    <option value={getTransactionCategory(transaction)}>{getTransactionCategory(transaction)}</option>
+                                  )}
+                                  {CATEGORY_OPTIONS.map((category) => (
+                                    <option key={category} value={category}>{category}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            </td>
+                            <td className="date-cell">
+                              {formatDate(transaction.date ?? transaction.transaction_date)}
+                            </td>
+                            <td className={`amount-cell ${amountDirection}`}>
+                              {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : transactions.length > 0 ? (
+                <div className="empty-state">
+                  <p>No transactions match “{searchQuery.trim()}”.</p>
+                  <button className="text-button" onClick={() => setSearchQuery("")}>Clear search</button>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <p>No transactions available. Upload a statement first.</p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activePage === "Statement History" && (
+            <section className="panel transactions-panel full-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Statement history</h2>
+                  <p>Previously uploaded and analyzed statements for this account.</p>
+                </div>
+                <button className="text-button" onClick={() => setActivePage("Dashboard")}>
+                  Back to dashboard <ArrowUpRight size={14} />
+                </button>
+              </div>
+              {statements.length > 0 ? (
+                <div className="statement-history-list">
+                  {statements.map((statement) => (
+                    <div className="statement-history-row" key={statement.statement_id}>
+                      <button
+                        className="statement-history-open"
+                        onClick={() => loadSavedStatement(statement.statement_id).catch((loadError) => setError(loadError.message))}
+                      >
+                        <span className="statement-history-icon"><History size={18} /></span>
+                        <span className="statement-history-name">
+                          <strong>{statement.filename || "Bank statement"}</strong>
+                          <small>{formatDate(statement.created_at)} | {statement.transaction_count} transactions</small>
+                        </span>
+                        <ArrowUpRight size={16} />
+                      </button>
+                      {statement.pdf_available && (
+                        <a
+                          className="statement-history-download"
+                          href={`${API}/statements/${statement.statement_id}/pdf`}
+                          download
+                          aria-label={`Download ${statement.filename || "bank statement"}`}
+                          title="Download original PDF"
+                        >
+                          <Download size={16} />
+                          <span>PDF</span>
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <History size={26} />
+                  <p>No statements have been uploaded to this account yet.</p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activePage === "Analytics" && (
+            selectedMetric ? (
+              <>
+                <section className="analytics-heading">
+                  <div>
+                    <div className="eyebrow"><span className="live-dot" /> CALCULATION DETAILS</div>
+                    <h1>{metricDetail.title}</h1>
+                    <p className="page-subtitle">See how this figure is calculated and which transactions contribute.</p>
+                  </div>
+                  <div className="analytics-heading-actions">
+                    <button className="secondary-button" onClick={() => {
+                      setSelectedMetric(null);
+                      setActivePage("Dashboard");
+                    }}>
+                      <LayoutDashboard size={16} /> Back to dashboard
+                    </button>
+                    <button className="secondary-button" onClick={() => setSelectedMetric(null)}>
+                      <ChartNoAxesCombined size={16} /> All categories
+                    </button>
+                  </div>
+                </section>
+
+                <section className="panel metric-calculation">
+                  <span>Calculation</span>
+                  <strong>{metricDetail.value}</strong>
+                  <p>{metricDetail.formula}</p>
+                  <small>{metricDetail.explanation}</small>
+                </section>
+
+                <section className="panel transactions-panel metric-transactions-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>Transactions included</h2>
+                      <p>{selectedMetricTransactions.length} transactions used in this calculation</p>
+                    </div>
+                  </div>
+                  {selectedMetricTransactions.length > 0 ? (
+                    <div className="transaction-table-wrap">
+                      <table>
+                        <thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>TYPE</th><th>DATE</th><th className="amount-column">AMOUNT</th></tr></thead>
+                        <tbody>
+                          {selectedMetricTransactions.map((transaction, index) => {
+                            const amountDirection = getAmountDirection(transaction);
+                            return (
+                              <tr key={transaction.id ?? `${transaction.description}-${index}`}>
+                                <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
+                                <td><span className="category-pill">{getTransactionCategory(transaction)}</span></td>
+                                <td className="date-cell">{transaction.transaction_type}</td>
+                                <td className="date-cell">{formatDate(transaction.date)}</td>
+                                <td className={`amount-cell ${amountDirection}`}>
+                                  {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-category-detail"><p>No transactions contribute to this calculation yet.</p></div>
+                  )}
+                </section>
+              </>
+            ) : (
+            <>
+              <section className="analytics-heading">
+                <div>
+                  <div className="eyebrow"><span className="live-dot" /> SPENDING DETAILS</div>
+                  <h1>Explore your <span>categories.</span></h1>
+                  <p className="page-subtitle">Choose a category to inspect its transactions, including Other and UPI Sent/Received.</p>
+                </div>
+                <button className="secondary-button" onClick={() => setActivePage("Dashboard")}>
+                  <LayoutDashboard size={16} /> Back to dashboard
+                </button>
+              </section>
+
+              {hasRealData ? (
+                <>
+                  <div className="analytics-totals">
+                    <article><span>Total income</span><strong>{money(totalIncome)}</strong></article>
+                    <article><span>Total expenses</span><strong>{money(totalExpenses)}</strong></article>
+                    <article><span>Net cash flow</span><strong>{money(netCashFlow)}</strong></article>
+                  </div>
+
+                  {allCategoryEntries.length > 0 ? (
+                    <section className="category-detail-layout">
+                      <div className="category-cards">
+                        {allCategoryEntries.map((item, index) => (
+                          <button
+                            className={`category-summary-card ${selectedCategory === item.label ? "selected" : ""}`}
+                            key={item.label}
+                            onClick={() => setSelectedCategory(item.label)}
+                          >
+                            <span className="category-summary-top">
+                              <i className={`category-dot category-${index % 4}`} />
+                              <span>{item.label}</span>
+                              <ArrowUpRight size={15} />
+                            </span>
+                            <strong>{money(item.amount)}</strong>
+                            <span className="category-count">
+                              {item.count} transactions
+                            </span>
+                            <span className="spending-track">
+                              <span
+                                className={`category-fill fill-${index % 4}`}
+                                style={{ width: `${allCategoryTotal > 0 ? (item.amount / allCategoryTotal) * 100 : 0}%` }}
+                              />
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <section className="panel category-transactions-panel">
+                        {selectedCategory ? (
+                          <>
+                            <div className="panel-heading">
+                              <div>
+                                <h2>{selectedCategory}</h2>
+                                <p>{selectedCategoryTransactions.length} transactions | {money(allCategoryEntries.find((item) => item.label === selectedCategory)?.amount)}</p>
+                              </div>
+                              <button className="text-button" onClick={() => setSelectedCategory(null)}>Clear</button>
+                            </div>
+                            {selectedCategoryTransactions.length > 0 ? (
+                              <div className="transaction-table-wrap">
+                                <table>
+                                  <thead><tr><th>TRANSACTION</th><th>DATE</th><th className="amount-column">AMOUNT</th></tr></thead>
+                                  <tbody>
+                                    {selectedCategoryTransactions.map((transaction, index) => (
+                                      <tr key={transaction.id ?? `${transaction.description}-${index}`}>
+                                        <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
+                                        <td className="date-cell">{formatDate(transaction.date)}</td>
+                                        <td className={`amount-cell ${getAmountDirection(transaction)}`}>
+                                          {getAmountDirection(transaction) === "income" ? "+" : "−"}{money(getAmount(transaction))}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <p className="empty-category-detail">No transactions were found in this category.</p>
+                            )}
+                          </>
+                        ) : (
+                          <div className="empty-category-detail">
+                            <ChartNoAxesCombined size={24} />
+                            <p>Select a category to inspect its transactions.</p>
+                          </div>
+                        )}
+                      </section>
+                    </section>
+                  ) : (
+                    <div className="panel empty-category-detail"><p>No spending categories are available yet.</p></div>
+                  )}
+                </>
+              ) : (
+                <section className="panel empty-category-detail">
+                  <p>Upload a statement to explore your spending categories.</p>
+                  <button className="primary-button" onClick={() => setActivePage("Dashboard")}>
+                    <Upload size={16} /> Go to dashboard
+                  </button>
+                </section>
+              )}
+            </>
+            )
+          )}
+
+          {activePage === "AI Assistant" && (
+            <section className="panel chat-panel">
+              <div className="chat-welcome">
+                <span className="chat-logo"><Sparkles size={24} /></span>
+                <h2>Meet your money assistant.</h2>
+                <p>Ask questions about your spending, habits, and savings opportunities.</p>
+              </div>
+
+              <div className="suggestion-grid">
+                {[
+                  "Where am I spending the most?",
+                  "How can I save more?",
+                  "Summarize my monthly expenses",
+                ].map((prompt) => (
+                  <button key={prompt} onClick={() => setQuestion(prompt)}>
+                    {prompt} <ArrowUpRight size={15} />
+                  </button>
+                ))}
+              </div>
+
+              <div className="chat-messages">
+                {messages.map((message, index) => (
+                  <div
+                    className={message.role === "user" ? "chat-user-message" : "chat-assistant-message"}
+                    key={index}
+                  >
+                    {message.text}
+                    {message.suggestions?.length > 0 && (
+                      <div className="saving-suggestions">
+                        <span className="saving-suggestions-title">Ideas based on your spending</span>
+                        {message.suggestions.map((suggestion) => (
+                          <article className="saving-suggestion-card" key={suggestion.category}>
+                            <div className="saving-suggestion-heading">
+                              <strong>{suggestion.category}</strong>
+                              <span>{money(suggestion.amount)}</span>
+                            </div>
+                            <small>{suggestion.share}% of your categorized expenses</small>
+                            <p>{suggestion.tip}</p>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                    {message.transactions?.length > 0 && (
+                      <div className="category-results">
+                        {message.transactions.map((transaction, transactionIndex) => {
+                          const transactionType = getAmountDirection(transaction);
+                          return (
+                            <article
+                              className="category-result-row"
+                              key={transaction.id ?? `${transaction.description}-${transactionIndex}`}
+                            >
+                              <div className="category-result-details">
+                                <strong>{getTransactionName(transaction)}</strong>
+                                <span>{formatDate(transaction.date)}</span>
+                              </div>
+                              <strong className={`category-result-amount ${transactionType}`}>
+                                {transactionType === "income" ? "+" : "−"}
+                                {money(getAmount(transaction))}
+                              </strong>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {message.followUps?.length > 0 && (
+                      <div className="follow-up-questions" aria-label="Suggested follow-up questions">
+                        <span>Ask next</span>
+                        {message.followUps.map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            disabled={asking}
+                            onClick={() => askQuestion(prompt)}
+                          >
+                            {prompt} <ArrowUpRight size={13} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {asking && <div className="chat-assistant-message">Stack Up is thinking...</div>}
+              </div>
+
+              <form className="chat-input-form" onSubmit={sendQuestion}>
+                <input
+                  ref={chatInputRef}
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="Ask anything about your money..."
+                  disabled={asking}
+                />
+                <button type="submit" aria-label="Send question" disabled={asking}>
+                  <ArrowUpRight size={19} />
+                </button>
+              </form>
+
+              <p className="demo-note">
+                Questions are sent to your Stack Up backend using your current workspace ID.
+              </p>
+            </section>
+          )}
+
+          <footer className="footer">
+            <span>STACK UP <span className="footer-dot">●</span> YOUR FINANCES, MADE CLEAR.</span>
+            <span><CircleHelp size={14} /> Built for better money decisions</span>
+          </footer>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default App;
