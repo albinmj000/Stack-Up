@@ -141,9 +141,9 @@ CATEGORIES = {
 
 def authenticated_account(request: Request):
     device_token = request.cookies.get("stack_up_device")
-    if device_token:
-        account = get_auth_device_user(device_token)
-    else:
+    account = get_auth_device_user(device_token) if device_token else None
+    # A stale device cookie should not invalidate a valid login session.
+    if account is None:
         account = get_session_user(request.cookies.get("stack_up_session"))
     if account is None:
         raise HTTPException(status_code=401, detail="Please sign in to continue.")
@@ -277,9 +277,8 @@ async def auth_me(request: Request):
 @app.get("/auth/accounts")
 async def auth_accounts(request: Request):
     device_token = request.cookies.get("stack_up_device")
-    if device_token:
-        if get_auth_device_user(device_token) is None:
-            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+    device_account = get_auth_device_user(device_token) if device_token else None
+    if device_account is not None:
         accounts = list_auth_device_accounts(device_token)
     else:
         account = get_session_user(request.cookies.get("stack_up_session"))
