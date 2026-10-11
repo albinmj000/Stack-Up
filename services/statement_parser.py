@@ -60,6 +60,28 @@ def find_date_match(text):
     return min(matches, key=lambda match: match.start())
 
 
+def is_standalone_date(line):
+    """Return whether a normalized line contains only a supported date."""
+    return any(
+        re.fullmatch(pattern, line, re.IGNORECASE)
+        for pattern in DATE_PATTERNS
+    )
+
+
+def find_undelimited_date_start(line):
+    """Find a transaction date at the start of a row without a row number."""
+    for pattern in DATE_PATTERNS:
+        match = re.match(rf"^({pattern})(?:\s+|$)", line, re.IGNORECASE)
+        if match:
+            return {
+                "number": None,
+                "date": match.group(1),
+                "description": line[match.end():].strip(),
+                "raw": line[match.end():].strip(),
+            }
+    return None
+
+
 def find_transaction_start(line):
     """
     Identify a numbered transaction row whose date appears near
@@ -283,6 +305,18 @@ def extract_transactions_from_text(text):
         if is_ignorable_line(line):
             continue
 
+        # Axis Bank statements commonly put the transaction date on its own
+        # line, followed by wrapped particulars and then amount/balance values.
+        if is_standalone_date(line):
+            finish_transaction(current)
+            current = {
+                "number": len(transactions) + 1,
+                "date": line,
+                "description": "",
+                "raw": "",
+            }
+            continue
+
         if line.lower() in {
             "end of statement",
             "end of transactions",
@@ -292,12 +326,16 @@ def extract_transactions_from_text(text):
             break
 
         transaction_start = find_transaction_start(line)
+        if not transaction_start:
+            # Some PDF extractors put the date and particulars on one line;
+            # others put the date on a separate line.
+            transaction_start = find_undelimited_date_start(line)
 
         if transaction_start:
             finish_transaction(current)
 
             current = {
-                "number": transaction_start["number"],
+                "number": transaction_start["number"] or len(transactions) + 1,
                 "date": transaction_start["date"],
                 "description": transaction_start["description"],
                 "raw": transaction_start["raw"],
