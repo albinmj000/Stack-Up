@@ -197,12 +197,19 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertNotIn("person@example.test", output)
 
     def test_resend_non_json_error_does_not_log_raw_body(self):
+        api_key = "test-resend-api-key"
+        otp = "123456"
+        raw_body = (
+            f"Request denied for person@example.test; key {api_key}; code {otp}. "
+            + "x" * 500
+        ).encode()
         provider_error = HTTPError(
-            "https://api.resend.com/emails", 403, "Forbidden", {},
-            io.BytesIO(b"raw response may contain private data"),
+            "https://api.resend.com/emails", 403, "Forbidden",
+            {"Content-Type": "text/plain; charset=utf-8"},
+            io.BytesIO(raw_body),
         )
         with patch.dict(os.environ, {
-            "RESEND_API_KEY": "test-api-key",
+            "RESEND_API_KEY": api_key,
             "RESEND_FROM_EMAIL": "onboarding@resend.dev",
             "RESEND_TEST_RECIPIENT": "person@example.test",
         }), patch("services.auth_service.urllib.request.urlopen", side_effect=provider_error):
@@ -212,9 +219,14 @@ class EmailDeliveryTests(unittest.TestCase):
 
         output = " ".join(captured.output)
         self.assertIn("HTTP 403", output)
-        self.assertIn("name=Unknown provider error", output)
-        self.assertIn("non-JSON error response", output)
-        self.assertNotIn("raw response may contain private data", output)
+        self.assertIn("content_type=text/plain; charset=utf-8", output)
+        self.assertIn("response_excerpt=Request denied for [email redacted]", output)
+        excerpt = output.split("response_excerpt=", 1)[1][:-2]
+        self.assertLessEqual(len(excerpt), 300)
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(otp, output)
+        self.assertNotIn("person@example.test", output)
+        self.assertNotIn("x" * 350, output)
 
 
 if __name__ == "__main__":

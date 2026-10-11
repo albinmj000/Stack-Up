@@ -43,22 +43,32 @@ def _safe_resend_error_field(value, api_key, otp_code, limit=400):
 
 
 def _read_resend_error(error, api_key, otp_code):
-    """Extract only Resend's documented error name/message fields from an HTTP error."""
+    """Extract structured error fields or a short sanitized excerpt from the response."""
+    headers = getattr(error, "headers", None)
+    content_type = headers.get("Content-Type", "unknown") if hasattr(headers, "get") else "unknown"
+    content_type = _safe_resend_error_field(str(content_type), api_key, otp_code, limit=120)
+
+    body = ""
     try:
-        body = error.read(16_384).decode("utf-8", errors="replace")
+        body = error.read(4_096).decode("utf-8", errors="replace")
         data = json.loads(body)
     except Exception:
         data = None
 
-    if isinstance(data, dict) and isinstance(data.get("error"), dict):
+    if not isinstance(data, dict):
+        excerpt = _safe_resend_error_field(body, api_key, otp_code, limit=300) if body else "[empty response]"
+        return None, None, content_type, excerpt
+
+    if isinstance(data.get("error"), dict):
         data = data["error"]
 
     if not isinstance(data, dict):
-        return "Unknown provider error", "Resend returned a non-JSON error response."
+        excerpt = _safe_resend_error_field(body, api_key, otp_code, limit=300) if body else "[empty response]"
+        return None, None, content_type, excerpt
 
     name = _safe_resend_error_field(data.get("name"), api_key, otp_code, limit=100)
     message = _safe_resend_error_field(data.get("message"), api_key, otp_code)
-    return name, message
+    return name, message, content_type, None
 
 
 def normalize_contact(value):
@@ -154,13 +164,24 @@ def _send_email_otp(email, code):
                 )
                 raise RuntimeError("Resend could not send the verification email. Check the Resend dashboard.")
     except urllib.error.HTTPError as error:
-        error_name, error_message = _read_resend_error(error, resend_api_key, code)
-        logger.warning(
-            "Resend rejected an OTP email (HTTP %s, name=%s, message=%s).",
-            error.code,
-            error_name,
-            error_message,
+        error_name, error_message, content_type, excerpt = _read_resend_error(
+            error, resend_api_key, code
         )
+        if excerpt is not None:
+            logger.warning(
+                "Resend rejected an OTP email (HTTP %s, content_type=%s, response_excerpt=%s).",
+                error.code,
+                content_type,
+                excerpt,
+            )
+        else:
+            logger.warning(
+                "Resend rejected an OTP email (HTTP %s, content_type=%s, name=%s, message=%s).",
+                error.code,
+                content_type,
+                error_name,
+                error_message,
+            )
         raise RuntimeError(
             f"Resend could not send the verification email (HTTP {error.code}). "
             "Check the sender configuration and Resend dashboard."
