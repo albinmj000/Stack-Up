@@ -224,9 +224,9 @@ def is_ignorable_line(line):
 
 
 STATEMENT_SUMMARY_PATTERNS = [
-    re.compile(r"^(?:transaction\s+total|total\s+transactions?)\b", re.IGNORECASE),
-    re.compile(r"^(?:closing|available)\s+balance\b", re.IGNORECASE),
-    re.compile(r"^total\s+(?:debits?|credits?|withdrawals?|deposits?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:transaction\s+total|total\s+transactions?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:closing|available)\s+balance\b", re.IGNORECASE),
+    re.compile(r"\btotal\s+(?:debits?|credits?|withdrawals?|deposits?)\b", re.IGNORECASE),
 ]
 
 
@@ -313,9 +313,18 @@ def extract_transactions_from_text(text):
         if not line:
             continue
 
-        # Footer totals and closing balances belong to the statement, not to
-        # the final transaction. Finish the pending row before ignoring them.
-        if is_statement_summary_line(line):
+        # PDF text extraction can place the footer label after the final
+        # transaction on the same line. Keep only the transaction text before
+        # that label, then discard the statement summary values.
+        summary_match = next(
+            (pattern.search(line) for pattern in STATEMENT_SUMMARY_PATTERNS
+             if pattern.search(line)),
+            None,
+        )
+        if summary_match:
+            transaction_text = line[:summary_match.start()].strip()
+            if transaction_text and current is not None:
+                current["raw"] += " " + transaction_text
             finish_transaction(current)
             current = None
             continue
