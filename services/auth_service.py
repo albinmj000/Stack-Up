@@ -153,6 +153,8 @@ def _send_email_otp(email, code):
         headers={
             "Authorization": f"Bearer {resend_api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Stack-Up/1.0",
         },
     )
     try:

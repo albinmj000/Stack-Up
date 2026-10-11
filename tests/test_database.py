@@ -137,6 +137,8 @@ class EmailDeliveryTests(unittest.TestCase):
         payload = json.loads(request.data.decode())
         self.assertEqual(request.full_url, "https://api.resend.com/emails")
         self.assertEqual(request.get_header("Authorization"), "Bearer test-api-key")
+        self.assertEqual(request.get_header("Accept"), "application/json")
+        self.assertEqual(request.get_header("User-agent"), "Stack-Up/1.0")
         self.assertEqual(payload["from"], "onboarding@resend.dev")
         self.assertEqual(payload["to"], ["person@example.test"])
         self.assertIn("123456", payload["text"])
