@@ -226,6 +226,7 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertNotIn(api_key, output)
         self.assertNotIn(otp, output)
         self.assertNotIn("person@example.test", output)
+        self.assertNotIn("Authorization", output)
         self.assertNotIn("x" * 350, output)
 
 
