@@ -67,6 +67,38 @@ def verify_password(password, stored_hash):
 
 
 def _send_email_otp(email, code):
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if resend_api_key:
+        sender = os.getenv("RESEND_FROM_EMAIL")
+        if not sender:
+            raise RuntimeError("Set RESEND_FROM_EMAIL to a verified sender address.")
+
+        payload = json.dumps({
+            "from": sender,
+            "to": [email],
+            "subject": "Your Stack Up sign-in code",
+            "text": f"Your Stack Up verification code is {code}. It expires in 10 minutes.",
+        }).encode()
+        request = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                if response.status >= 300:
+                    raise RuntimeError("Email provider rejected the OTP message.")
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(
+                f"Email provider rejected the OTP message (HTTP {error.code}). "
+                "Check the provider logs and verify the sender address."
+            ) from error
+        return
+
     host = os.getenv("SMTP_HOST")
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")

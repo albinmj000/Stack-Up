@@ -10,9 +10,18 @@ import time
 load_dotenv()
 
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
+client = None
+
+
+def get_client():
+    """Create the Groq client only when an AI request actually needs it."""
+    global client
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("AI insights are not configured. Set GROQ_API_KEY on the backend service.")
+    if client is None:
+        client = Groq(api_key=api_key)
+    return client
 
 
 MODEL = "openai/gpt-oss-20b"
@@ -66,7 +75,7 @@ Saved transaction count: {len(transactions)}
 Older transactions omitted from details: {omitted_count}
 Transaction data: {json.dumps(transaction_context, ensure_ascii=False, default=str)}
 """
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
@@ -186,7 +195,7 @@ Correct format:
 }}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -327,7 +336,7 @@ Transactions:
 
             for attempt in range(max_retries):
                 try:
-                    response = client.chat.completions.create(
+                    response = get_client().chat.completions.create(
                         model=MODEL,
                         messages=[
                             {

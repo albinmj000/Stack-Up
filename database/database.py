@@ -1,16 +1,103 @@
 import hashlib
+import os
+import re
 import secrets
 import sqlite3
 import time
 import uuid
+from pathlib import Path
 
-DATABASE_PATH = "stack_up.db"
+DATABASE_PATH = os.getenv("DB_PATH", "stack_up.db")
+
+
+class PostgreSQLConnection:
+    """Small compatibility layer so the existing queries work with psycopg."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return self._connection.__exit__(exc_type, exc_value, traceback)
+        finally:
+            self._connection.close()
+
+    def execute(self, sql, parameters=()):
+        pragma = re.fullmatch(r"\s*PRAGMA\s+table_info\((\w+)\)\s*;?\s*", sql, re.IGNORECASE)
+        if pragma:
+            return self._connection.execute(
+                "SELECT column_name AS name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = %s",
+                (pragma.group(1).lower(),),
+            )
+
+        query = re.sub(
+            r"\bINSERT\s+OR\s+IGNORE\s+INTO\b",
+            "INSERT INTO",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        ignored_conflicts = bool(
+            re.search(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql, re.IGNORECASE)
+        )
+        query = re.sub(
+            r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b",
+            "BIGSERIAL PRIMARY KEY",
+            query,
+            flags=re.IGNORECASE,
+        )
+        query = re.sub(r"\bBLOB\b", "BYTEA", query, flags=re.IGNORECASE)
+        query = query.replace("?", "%s")
+        if ignored_conflicts:
+            query = query.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+        return self._connection.execute(query, parameters)
+
+
+class SQLiteConnection:
+    """Close local SQLite connections after their transaction context ends."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return self._connection.__exit__(exc_type, exc_value, traceback)
+        finally:
+            self._connection.close()
+
+    def execute(self, sql, parameters=()):
+        return self._connection.execute(sql, parameters)
 
 
 def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url[len("postgres://"):]
+        connection = psycopg.connect(database_url, row_factory=dict_row)
+        return PostgreSQLConnection(connection)
+
+    database_path = Path(DATABASE_PATH)
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(str(database_path))
     connection.row_factory = sqlite3.Row
-    return connection
+    return SQLiteConnection(connection)
+
+
+def _insert_id(connection, sql, parameters):
+    if os.getenv("DATABASE_URL", "").strip():
+        row = connection.execute(sql.rstrip().rstrip(";") + " RETURNING id", parameters).fetchone()
+        return row["id"]
+    return connection.execute(sql, parameters).lastrowid
 
 
 def create_users_table():
@@ -31,7 +118,10 @@ def create_users_table():
                 connection.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email) WHERE email IS NOT NULL")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique ON users(phone) WHERE phone IS NOT NULL")
-        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username COLLATE NOCASE) WHERE username IS NOT NULL")
+        if os.getenv("DATABASE_URL", "").strip():
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(LOWER(username)) WHERE username IS NOT NULL")
+        else:
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username COLLATE NOCASE) WHERE username IS NOT NULL")
 
 
 def create_auth_tables():
@@ -148,7 +238,7 @@ def create_otp_challenge(contact, channel, code, create_account=False, username=
     code_hash = hashlib.sha256(f"{salt}:{code}".encode()).hexdigest()
     now = time.time()
     with get_connection() as connection:
-        cursor = connection.execute("""
+        challenge_id = _insert_id(connection, """
             INSERT INTO otp_challenges
                 (contact, channel, code_hash, salt, create_account, username,
                  password_hash, created_at, expires_at)
@@ -157,7 +247,7 @@ def create_otp_challenge(contact, channel, code, create_account=False, username=
             contact, channel, code_hash, salt, int(create_account),
             username, password_hash, now, now + 600,
         ))
-        return cursor.lastrowid
+        return challenge_id
 
 
 def invalidate_otp_challenge(challenge_id):
@@ -213,7 +303,7 @@ def get_account_by_contact(contact, channel):
 def get_account_by_username(username):
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT user_id, email, phone, username, password_hash FROM users WHERE username = ? COLLATE NOCASE",
+            "SELECT user_id, email, phone, username, password_hash FROM users WHERE LOWER(username) = LOWER(?)",
             (username,),
         ).fetchone()
     return dict(row) if row else None
@@ -586,21 +676,35 @@ def _insert_transactions(connection, user_id, statement_id, transactions):
 def save_statement_with_transactions(user_id, file_hash, filename, transactions, pdf_data):
     """Create a statement, its original PDF, and transactions atomically."""
     with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT OR IGNORE INTO statements (user_id, file_hash, filename, pdf_data)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, file_hash.lower(), filename, pdf_data),
-        )
-        if cursor.rowcount == 0:
+        insert_parameters = (user_id, file_hash.lower(), filename, pdf_data)
+        if os.getenv("DATABASE_URL", "").strip():
+            inserted = connection.execute(
+                """
+                INSERT INTO statements (user_id, file_hash, filename, pdf_data)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, file_hash) DO NOTHING
+                RETURNING id
+                """,
+                insert_parameters,
+            ).fetchone()
+            statement_id = inserted["id"] if inserted else None
+        else:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO statements (user_id, file_hash, filename, pdf_data)
+                VALUES (?, ?, ?, ?)
+                """,
+                insert_parameters,
+            )
+            statement_id = cursor.lastrowid if cursor.rowcount else None
+
+        if statement_id is None:
             row = connection.execute(
                 "SELECT id FROM statements WHERE user_id = ? AND file_hash = ?",
                 (user_id, file_hash.lower()),
             ).fetchone()
             return (row["id"] if row else None), False
 
-        statement_id = cursor.lastrowid
         _insert_transactions(connection, user_id, statement_id, transactions)
         return statement_id, True
 

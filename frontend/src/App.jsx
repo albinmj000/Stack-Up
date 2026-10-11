@@ -19,9 +19,9 @@ import {
   LogOut,
 } from "lucide-react";
 import stackUpLogo from "./assets/stackup-logo.svg";
+import { API, readApiResponse } from "./api";
 import "./App.css";
 
-const API = "/api";
 const CATEGORY_OPTIONS = [
   "Food", "Transport", "Shopping", "Bills & Utilities",
   "Entertainment", "Healthcare", "Loan / Credit", "Bank Charges",
@@ -210,7 +210,7 @@ function AuthScreen({ onAuthenticated, initialNotice = "" }) {
         credentials: "include",
         body: JSON.stringify({ username, password }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not sign in.");
       onAuthenticated(result.account);
     } catch (requestError) {
@@ -235,7 +235,7 @@ function AuthScreen({ onAuthenticated, initialNotice = "" }) {
           password: mode === "create" ? password : undefined,
         }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not send a code.");
       setStage("verify");
       setNotice(result.message || "Enter the verification code we sent you.");
@@ -257,7 +257,7 @@ function AuthScreen({ onAuthenticated, initialNotice = "" }) {
         credentials: "include",
         body: JSON.stringify({ contact, code }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not verify that code.");
       onAuthenticated(result.account);
     } catch (requestError) {
@@ -367,14 +367,14 @@ function App() {
   async function refreshStatementHistory() {
     const response = await fetch(`${API}/statements`, { credentials: "include" });
     if (!response.ok) throw new Error("Could not load statement history.");
-    const result = await response.json();
+    const result = await readApiResponse(response);
     setStatements(Array.isArray(result.statements) ? result.statements : []);
     return Array.isArray(result.statements) ? result.statements : [];
   }
 
   async function loadSavedStatement(statementId) {
     const response = await fetch(`${API}/statements/${statementId}`, { credentials: "include" });
-    const result = await response.json();
+    const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not load this statement.");
     setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
     setAnalysis(result.analysis ?? null);
@@ -390,7 +390,7 @@ function App() {
     try {
       const accountsResponse = await fetch(`${API}/auth/accounts`, { credentials: "include" });
       if (accountsResponse.ok) {
-        const accountsResult = await accountsResponse.json();
+        const accountsResult = await readApiResponse(accountsResponse);
         setRememberedAccounts(Array.isArray(accountsResult.accounts) ? accountsResult.accounts : []);
       }
       const history = await refreshStatementHistory();
@@ -443,7 +443,7 @@ function App() {
         credentials: "include",
         body: JSON.stringify({ user_id: userId }),
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not switch accounts.");
       await finishSignIn(result.account);
     } catch (switchError) {
@@ -460,7 +460,7 @@ function App() {
         method: "POST",
         credentials: "include",
       });
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not add another account.");
       setAccount(null);
       setTransactions([]);
@@ -484,16 +484,16 @@ function App() {
       try {
         const response = await fetch(`${API}/auth/me`, { credentials: "include" });
         if (!response.ok) return;
-        const profile = await response.json();
+        const profile = await readApiResponse(response);
         setAccount(profile);
         const accountsResponse = await fetch(`${API}/auth/accounts`, { credentials: "include" });
         if (accountsResponse.ok) {
-          const accountsResult = await accountsResponse.json();
+          const accountsResult = await readApiResponse(accountsResponse);
           setRememberedAccounts(Array.isArray(accountsResult.accounts) ? accountsResult.accounts : []);
         }
         const historyResponse = await fetch(`${API}/statements`, { credentials: "include" });
         if (!historyResponse.ok) return;
-        const historyResult = await historyResponse.json();
+        const historyResult = await readApiResponse(historyResponse);
         const history = Array.isArray(historyResult.statements) ? historyResult.statements : [];
         setStatements(history);
         if (history.length > 0) {
@@ -502,7 +502,7 @@ function App() {
             { credentials: "include" }
           );
           if (statementResponse.ok) {
-            const statementResult = await statementResponse.json();
+            const statementResult = await readApiResponse(statementResponse);
             setTransactions(statementResult.transactions ?? []);
             setAnalysis(statementResult.analysis ?? null);
           }
@@ -545,7 +545,7 @@ function App() {
           body: JSON.stringify({ category }),
         }
       );
-      const result = await response.json();
+      const result = await readApiResponse(response);
       if (!response.ok || result.status !== "success") {
         throw new Error(result.message || "Could not update this category.");
       }
@@ -589,7 +589,7 @@ function App() {
         }
       );
 
-      const result = await response.json();
+      const result = await readApiResponse(response);
 
       if (!response.ok) {
         throw new Error(result.detail || "Upload failed.");
@@ -643,7 +643,7 @@ function App() {
         credentials: "include",
       });
 
-      const result = await response.json();
+      const result = await readApiResponse(response);
 
       if (!response.ok) {
         throw new Error(result.detail || "The assistant request failed.");

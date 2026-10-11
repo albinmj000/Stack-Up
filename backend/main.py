@@ -10,7 +10,7 @@ import urllib.error
 from urllib.parse import quote
 
 from fastapi import FastAPI, UploadFile, File, Request, Query, Body, HTTPException, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -71,16 +71,53 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+FRONTEND_URLS = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FRONTEND_URL", "").split(",")
+    if origin.strip()
+]
+if APP_ENV == "production" and not FRONTEND_URLS:
+    raise RuntimeError("FRONTEND_URL must be set to the deployed frontend origin in production.")
+if APP_ENV != "production":
+    FRONTEND_URLS.extend([
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-    ],
+    ])
+
+COOKIE_SECURE = os.getenv(
+    "COOKIE_SECURE", "true" if APP_ENV == "production" else "false"
+).strip().lower() == "true"
+COOKIE_SAMESITE = os.getenv(
+    "COOKIE_SAMESITE", "none" if APP_ENV == "production" else "lax"
+).strip().lower()
+if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    raise RuntimeError("COOKIE_SAMESITE must be one of: lax, strict, none.")
+if COOKIE_SAMESITE == "none" and not COOKIE_SECURE:
+    raise RuntimeError("COOKIE_SECURE must be true when COOKIE_SAMESITE is none.")
+
+if APP_ENV == "production" and not os.getenv("DATABASE_URL", "").strip():
+    raise RuntimeError("DATABASE_URL must point to a persistent PostgreSQL database in production.")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=sorted(set(FRONTEND_URLS)),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def validate_browser_origin(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path != "/webhook":
+        origin = request.headers.get("origin")
+        if origin and origin.rstrip("/") not in FRONTEND_URLS:
+            return JSONResponse(
+                {"detail": "Requests from this website are not allowed."},
+                status_code=403,
+            )
+    return await call_next(request)
 
 WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
@@ -111,13 +148,12 @@ def authenticated_account(request: Request):
 
 
 def set_auth_cookies(response, session_token, device_token):
-    secure = os.getenv("COOKIE_SECURE", "false").lower() == "true"
     response.set_cookie(
         key="stack_up_session",
         value=session_token,
         httponly=True,
-        secure=secure,
-        samesite="lax",
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=30 * 24 * 3600,
         path="/",
     )
@@ -125,8 +161,8 @@ def set_auth_cookies(response, session_token, device_token):
         key="stack_up_device",
         value=device_token,
         httponly=True,
-        secure=secure,
-        samesite="lax",
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=30 * 24 * 3600,
         path="/",
     )
@@ -283,13 +319,16 @@ async def auth_add_account(request: Request, response: Response):
         device_token = remember_account_on_device(None, account["user_id"])
     deactivate_auth_device(device_token)
     delete_auth_session(request.cookies.get("stack_up_session"))
-    response.delete_cookie("stack_up_session", path="/", httponly=True, samesite="lax")
+    response.delete_cookie(
+        "stack_up_session", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+    )
     response.set_cookie(
         key="stack_up_device",
         value=device_token,
         httponly=True,
-        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
-        samesite="lax",
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=30 * 24 * 3600,
         path="/",
     )
@@ -300,8 +339,14 @@ async def auth_add_account(request: Request, response: Response):
 async def auth_logout(request: Request, response: Response):
     delete_auth_session(request.cookies.get("stack_up_session"))
     delete_auth_device(request.cookies.get("stack_up_device"))
-    response.delete_cookie("stack_up_session", path="/", httponly=True, samesite="lax")
-    response.delete_cookie("stack_up_device", path="/", httponly=True, samesite="lax")
+    response.delete_cookie(
+        "stack_up_session", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+    )
+    response.delete_cookie(
+        "stack_up_device", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+    )
     return {"status": "success"}
 
 
@@ -311,6 +356,11 @@ def home():
         "message": "Stack Up API is running!",
         "status": "success",
     }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/webhook", response_class=PlainTextResponse)
