@@ -4,11 +4,11 @@ import json
 import base64
 import hashlib
 import secrets
-import smtplib
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from email.message import EmailMessage
+from email.utils import parseaddr
 
 from database.database import (
     can_request_otp,
@@ -18,6 +18,8 @@ from database.database import (
     invalidate_otp_challenge,
     verify_otp_challenge,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_contact(value):
@@ -67,57 +69,64 @@ def verify_password(password, stored_hash):
 
 
 def _send_email_otp(email, code):
-    resend_api_key = os.getenv("RESEND_API_KEY")
-    if resend_api_key:
-        sender = os.getenv("RESEND_FROM_EMAIL")
-        if not sender:
-            raise RuntimeError("Set RESEND_FROM_EMAIL to a verified sender address.")
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    if not resend_api_key:
+        raise RuntimeError("Email OTP delivery is not configured. Set RESEND_API_KEY on the backend.")
 
-        payload = json.dumps({
-            "from": sender,
-            "to": [email],
-            "subject": "Your Stack Up sign-in code",
-            "text": f"Your Stack Up verification code is {code}. It expires in 10 minutes.",
-        }).encode()
-        request = urllib.request.Request(
-            "https://api.resend.com/emails",
-            data=payload,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {resend_api_key}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                if response.status >= 300:
-                    raise RuntimeError("Email provider rejected the OTP message.")
-        except urllib.error.HTTPError as error:
+    sender = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip()
+    if not sender:
+        sender = "onboarding@resend.dev"
+
+    # Resend's shared testing sender is restricted to the one address configured
+    # for this app, so the test setup cannot send codes to arbitrary users.
+    sender_address = parseaddr(sender)[1].lower()
+    if sender_address == "onboarding@resend.dev":
+        test_recipient = os.getenv("RESEND_TEST_RECIPIENT", "").strip().lower()
+        if not test_recipient:
             raise RuntimeError(
-                f"Email provider rejected the OTP message (HTTP {error.code}). "
-                "Check the provider logs and verify the sender address."
-            ) from error
-        return
+                "Set RESEND_TEST_RECIPIENT to the email address registered with Resend."
+            )
+        if email.strip().lower() != test_recipient:
+            raise RuntimeError(
+                "Email verification is currently restricted to the configured Resend test recipient."
+            )
 
-    host = os.getenv("SMTP_HOST")
-    username = os.getenv("SMTP_USERNAME")
-    password = os.getenv("SMTP_PASSWORD")
-    sender = os.getenv("SMTP_FROM_EMAIL") or username
-    if not all((host, username, password, sender)):
-        raise RuntimeError("Email OTP delivery is not configured on the server.")
-
-    message = EmailMessage()
-    message["Subject"] = "Your Stack Up sign-in code"
-    message["From"] = sender
-    message["To"] = email
-    message.set_content(
-        f"Your Stack Up verification code is {code}. It expires in 10 minutes."
+    payload = json.dumps({
+        "from": sender,
+        "to": [email],
+        "subject": "Your Stack Up sign-in code",
+        "text": f"Your Stack Up verification code is {code}. It expires in 10 minutes.",
+    }).encode()
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json",
+        },
     )
-    port = int(os.getenv("SMTP_PORT", "587"))
-    with smtplib.SMTP(host, port, timeout=15) as server:
-        server.starttls()
-        server.login(username, password)
-        server.send_message(message)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status >= 300:
+                logger.warning("Resend rejected an OTP email (HTTP %s).", response.status)
+                raise RuntimeError("Resend could not send the verification email. Check the Resend dashboard.")
+    except urllib.error.HTTPError as error:
+        logger.warning("Resend rejected an OTP email (HTTP %s).", error.code)
+        raise RuntimeError(
+            f"Resend could not send the verification email (HTTP {error.code}). "
+            "Check the sender configuration and Resend dashboard."
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        reason = getattr(error, "reason", None)
+        error_number = getattr(error, "errno", None) or getattr(reason, "errno", None)
+        if error_number is None:
+            logger.error("Resend OTP request failed because of a network error (%s).", type(error).__name__)
+        else:
+            logger.error("Resend OTP request failed because of a network error (errno=%s).", error_number)
+        raise RuntimeError(
+            "The email provider could not be reached. Check the backend network and Resend configuration."
+        ) from None
 
 
 def _send_sms_otp(phone, code):

@@ -2,20 +2,25 @@
 
 Stack Up accounts use a unique username and password to sign in. Account
 creation also verifies an email address or international phone number with a
-one-time code. Email delivery uses SMTP; SMS delivery uses Twilio. Configure
-at least one provider in the backend environment before users create accounts.
+one-time code. Email delivery uses the Resend HTTPS API; SMS delivery uses
+Twilio. Configure at least one provider in the backend environment before
+users create accounts.
 
-## Email (SMTP)
+## Email (Resend)
 
-Set these backend environment variables:
+For initial testing without a custom domain, set these variables on the
+backend service:
 
 ```text
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USERNAME=your-smtp-username
-SMTP_PASSWORD=your-smtp-password
-SMTP_FROM_EMAIL=your-verified-sender@example.com
+RESEND_API_KEY=your-resend-api-key
+RESEND_FROM_EMAIL=onboarding@resend.dev
+RESEND_TEST_RECIPIENT=the-email-registered-with-your-resend-account
 ```
+
+The application sends test-sender OTPs only to `RESEND_TEST_RECIPIENT`. Keep
+the API key private. For production delivery to users, verify a domain in
+Resend and set `RESEND_FROM_EMAIL` to a sender on that domain; the test
+recipient allowlist is only applied to `onboarding@resend.dev`.
 
 ## SMS (Twilio)
 

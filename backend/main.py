@@ -1,4 +1,5 @@
 import os
+import logging
 import traceback
 import json
 import hashlib
@@ -15,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 from services.statement_parser import (
     extract_text_from_pdf,
@@ -186,7 +189,7 @@ async def auth_request_otp(payload: dict = Body(...)):
         status_code = 429 if "wait before" in str(error).lower() else 503
         raise HTTPException(status_code=status_code, detail=str(error)) from error
     except Exception as error:
-        print(f"OTP delivery failed: {error}")
+        logger.error("OTP delivery failed (%s).", type(error).__name__)
         raise HTTPException(status_code=503, detail="We couldn't deliver a verification code. Check the sign-in settings and try again.") from error
     return {"status": "sent", "message": f"A verification code was sent to your {channel}."}
 

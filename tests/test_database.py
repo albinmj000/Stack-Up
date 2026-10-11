@@ -1,9 +1,11 @@
 import os
 import json
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from database import database
 from database.corrections import get_correction, save_correction
@@ -126,8 +128,8 @@ class EmailDeliveryTests(unittest.TestCase):
         response.__enter__.return_value = response
         with patch.dict(os.environ, {
             "RESEND_API_KEY": "test-api-key",
-            "RESEND_FROM_EMAIL": "Stack Up <verify@example.test>",
-            "SMTP_HOST": "",
+            "RESEND_FROM_EMAIL": "",
+            "RESEND_TEST_RECIPIENT": "person@example.test",
         }), patch("services.auth_service.urllib.request.urlopen", return_value=response) as send:
             _send_email_otp("person@example.test", "123456")
 
@@ -135,8 +137,54 @@ class EmailDeliveryTests(unittest.TestCase):
         payload = json.loads(request.data.decode())
         self.assertEqual(request.full_url, "https://api.resend.com/emails")
         self.assertEqual(request.get_header("Authorization"), "Bearer test-api-key")
+        self.assertEqual(payload["from"], "onboarding@resend.dev")
         self.assertEqual(payload["to"], ["person@example.test"])
         self.assertIn("123456", payload["text"])
+
+    def test_resend_test_sender_rejects_unlisted_recipient(self):
+        with patch.dict(os.environ, {
+            "RESEND_API_KEY": "test-api-key",
+            "RESEND_FROM_EMAIL": "onboarding@resend.dev",
+            "RESEND_TEST_RECIPIENT": "person@example.test",
+        }), patch("services.auth_service.urllib.request.urlopen") as send:
+            with self.assertRaisesRegex(RuntimeError, "restricted"):
+                _send_email_otp("someone-else@example.test", "123456")
+
+        send.assert_not_called()
+
+    def test_missing_resend_key_does_not_fall_back_to_smtp(self):
+        with patch.dict(os.environ, {
+            "RESEND_API_KEY": "",
+            "SMTP_HOST": "smtp.example.test",
+            "SMTP_USERNAME": "test-user",
+            "SMTP_PASSWORD": "test-password",
+            "RESEND_FROM_EMAIL": "",
+        }), patch("services.auth_service.urllib.request.urlopen") as send:
+            with self.assertRaisesRegex(RuntimeError, "RESEND_API_KEY"):
+                _send_email_otp("person@example.test", "123456")
+
+        send.assert_not_called()
+
+    def test_resend_http_error_is_sanitized(self):
+        api_key = "test-api-key-do-not-log"
+        otp = "654321"
+        provider_error = HTTPError(
+            "https://api.resend.com/emails", 401, "Unauthorized", {},
+            io.BytesIO(b"secret provider body"),
+        )
+        with patch.dict(os.environ, {
+            "RESEND_API_KEY": api_key,
+            "RESEND_FROM_EMAIL": "onboarding@resend.dev",
+            "RESEND_TEST_RECIPIENT": "person@example.test",
+        }), patch("services.auth_service.urllib.request.urlopen", side_effect=provider_error):
+            with self.assertLogs("services.auth_service", level="WARNING") as captured:
+                with self.assertRaisesRegex(RuntimeError, "HTTP 401") as raised:
+                    _send_email_otp("person@example.test", otp)
+
+        output = " ".join(captured.output) + str(raised.exception)
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(otp, output)
+        self.assertNotIn("secret provider body", output)
 
 
 if __name__ == "__main__":

@@ -53,13 +53,13 @@ Add these environment variables to the backend service:
 | `COOKIE_SAMESITE` | `none` |
 | `GROQ_API_KEY` | Secret API key for real AI categorization and assistant responses |
 
-Configure at least one OTP delivery provider so users can verify accounts:
+Configure the OTP delivery variables needed by your providers:
 
-- Email through HTTPS (works on Render Free): `RESEND_API_KEY` and `RESEND_FROM_EMAIL`. Verify the sender address/domain with the provider first.
-- Email through SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL`.
-- SMS: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
+- Email through Resend HTTPS: `RESEND_API_KEY`. For initial testing without a domain, set `RESEND_FROM_EMAIL=onboarding@resend.dev` and `RESEND_TEST_RECIPIENT` to the email registered with your Resend account. The test sender is restricted in this application to that one recipient.
+- For production email after verifying a domain with Resend, set `RESEND_FROM_EMAIL` to a sender on that verified domain. The test-recipient restriction applies only to `onboarding@resend.dev`.
+- SMS through Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
 
-When `RESEND_API_KEY` is configured, the backend sends email OTPs through the Resend HTTPS API; otherwise it uses the SMTP settings. Render Free web services block outbound SMTP ports 25, 465, and 587, so use the HTTPS provider or Twilio SMS on that plan. See [Render's free service limits](https://render.com/docs/free).
+Email OTPs use Resend's HTTPS API; the backend does not fall back to SMTP. SMS OTPs continue to use Twilio.
 
 WhatsApp integration is optional. If used, configure `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, and `WHATSAPP_APP_SECRET`.
 
