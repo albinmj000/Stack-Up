@@ -223,6 +223,17 @@ def is_ignorable_line(line):
     return any(p.search(line) for p in IGNORE_PATTERNS)
 
 
+STATEMENT_SUMMARY_PATTERNS = [
+    re.compile(r"^(?:transaction\s+total|total\s+transactions?)\b", re.IGNORECASE),
+    re.compile(r"^(?:closing|available)\s+balance\b", re.IGNORECASE),
+    re.compile(r"^total\s+(?:debits?|credits?|withdrawals?|deposits?)\b", re.IGNORECASE),
+]
+
+
+def is_statement_summary_line(line):
+    return any(pattern.search(line) for pattern in STATEMENT_SUMMARY_PATTERNS)
+
+
 def extract_transactions_from_text(text):
     lines = text.splitlines()
     transactions = []
@@ -300,6 +311,13 @@ def extract_transactions_from_text(text):
         line = normalize_line(raw_line)
 
         if not line:
+            continue
+
+        # Footer totals and closing balances belong to the statement, not to
+        # the final transaction. Finish the pending row before ignoring them.
+        if is_statement_summary_line(line):
+            finish_transaction(current)
+            current = None
             continue
 
         if is_ignorable_line(line):
