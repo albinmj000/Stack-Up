@@ -168,9 +168,16 @@ class EmailDeliveryTests(unittest.TestCase):
     def test_resend_http_error_is_sanitized(self):
         api_key = "test-api-key-do-not-log"
         otp = "654321"
+        provider_message = (
+            f"The sender cannot deliver to person@example.test; key {api_key}; code {otp}."
+        )
         provider_error = HTTPError(
-            "https://api.resend.com/emails", 401, "Unauthorized", {},
-            io.BytesIO(b"secret provider body"),
+            "https://api.resend.com/emails", 403, "Forbidden", {},
+            io.BytesIO(json.dumps({
+                "statusCode": 403,
+                "name": "validation_error",
+                "message": provider_message,
+            }).encode()),
         )
         with patch.dict(os.environ, {
             "RESEND_API_KEY": api_key,
@@ -178,13 +185,36 @@ class EmailDeliveryTests(unittest.TestCase):
             "RESEND_TEST_RECIPIENT": "person@example.test",
         }), patch("services.auth_service.urllib.request.urlopen", side_effect=provider_error):
             with self.assertLogs("services.auth_service", level="WARNING") as captured:
-                with self.assertRaisesRegex(RuntimeError, "HTTP 401") as raised:
+                with self.assertRaisesRegex(RuntimeError, "HTTP 403") as raised:
                     _send_email_otp("person@example.test", otp)
 
         output = " ".join(captured.output) + str(raised.exception)
+        self.assertIn("HTTP 403", output)
+        self.assertIn("name=validation_error", output)
+        self.assertIn("The sender cannot deliver to", output)
         self.assertNotIn(api_key, output)
         self.assertNotIn(otp, output)
-        self.assertNotIn("secret provider body", output)
+        self.assertNotIn("person@example.test", output)
+
+    def test_resend_non_json_error_does_not_log_raw_body(self):
+        provider_error = HTTPError(
+            "https://api.resend.com/emails", 403, "Forbidden", {},
+            io.BytesIO(b"raw response may contain private data"),
+        )
+        with patch.dict(os.environ, {
+            "RESEND_API_KEY": "test-api-key",
+            "RESEND_FROM_EMAIL": "onboarding@resend.dev",
+            "RESEND_TEST_RECIPIENT": "person@example.test",
+        }), patch("services.auth_service.urllib.request.urlopen", side_effect=provider_error):
+            with self.assertLogs("services.auth_service", level="WARNING") as captured:
+                with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                    _send_email_otp("person@example.test", "123456")
+
+        output = " ".join(captured.output)
+        self.assertIn("HTTP 403", output)
+        self.assertIn("name=Unknown provider error", output)
+        self.assertIn("non-JSON error response", output)
+        self.assertNotIn("raw response may contain private data", output)
 
 
 if __name__ == "__main__":
