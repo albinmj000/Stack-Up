@@ -250,13 +250,29 @@ def extract_transactions_from_text(text):
         raw = normalize_line(transaction["raw"])
         money_matches = list(MONEY_PATTERN.finditer(raw))
 
-        # The final two monetary values should be transaction amount
-        # and running balance for the statement format supplied.
         if len(money_matches) < 2:
             return
 
-        amount_match = money_matches[-2]
-        balance_match = money_matches[-1]
+        # Prefer the adjacent amount/balance pair that agrees with the prior
+        # running balance. This protects the final transaction when a PDF
+        # extractor accidentally appends footer totals to its text.
+        pair_index = None
+        if previous_balance is not None:
+            for index in range(len(money_matches) - 1):
+                candidate_amount = parse_amount(money_matches[index].group())
+                candidate_balance = parse_amount(money_matches[index + 1].group())
+                if candidate_amount is None or candidate_balance is None:
+                    continue
+                movement = abs(candidate_balance - previous_balance)
+                if abs(movement - abs(candidate_amount)) <= Decimal("0.01"):
+                    pair_index = index
+
+        if pair_index is None:
+            # Fallback for formats without an opening or preceding balance.
+            pair_index = len(money_matches) - 2
+
+        amount_match = money_matches[pair_index]
+        balance_match = money_matches[pair_index + 1]
 
         amount = parse_amount(amount_match.group())
         balance = parse_amount(balance_match.group())
