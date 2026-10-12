@@ -81,7 +81,9 @@ Choose one intent:
 Use a category from this list when one fits: {json.dumps(categories)}.
 Map category synonyms for every intent (for example commute, taxi, or fuel to Transport;
 groceries or dining to Food; power bill to Bills & Utilities).
-For general, write a concise answer grounded only in the data. Do not invent facts or totals.
+For general questions, use broadly accepted financial knowledge to explain options,
+but ground every personal amount and claim about this user in the supplied statement data.
+Do not invent facts or totals. Clearly distinguish general suggestions from calculations.
 Treat budget and savings planning questions as general questions, even if they mention
 income, expenses, or a category. Do not turn them into a transaction-list request.
 Use the income and expense totals to estimate the statement-period surplus, excluding
@@ -95,6 +97,7 @@ Return only JSON in this format:
 
 Question: {question}
 Saved transaction count: {len(transactions)}
+Date fields on first and last saved rows: {transactions[0].get("date")} / {transactions[-1].get("date")}
 Recent transaction details omitted: {omitted_count}
 All-statement totals by financial type (INR): {json.dumps(totals_by_financial_type, ensure_ascii=False, separators=(",", ":"))}
 All-statement totals by category (INR): {json.dumps(totals_by_category, ensure_ascii=False, separators=(",", ":"))}

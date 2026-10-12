@@ -207,6 +207,32 @@ def handle_user_message(user_id, message):
             "category": correction["category"],
         }
 
+    # Budget-planning questions need the AI to understand the whole request
+    # before words like "income" or "expenses" can trigger category shortcuts.
+    budget_planning_question = is_budget_planning_question(message_lower)
+    if budget_planning_question:
+        transactions = get_user_transactions(user_id)
+        if not transactions:
+            return {
+                "type": "query",
+                "message": "Upload a bank statement first, and I can help plan a budget from your transactions.",
+            }
+        try:
+            understood = understand_financial_question(message, transactions)
+            return {
+                "type": "ai_answer",
+                "message": understood["answer"],
+            }
+        except Exception as error:
+            print(f"Ask Stack Up response failed: {error}")
+            return {
+                "type": "unknown",
+                "message": (
+                    "I couldn't prepare a budget answer just now. Please try again "
+                    "later, or ask about a specific total or spending category."
+                ),
+            }
+
     # 2. Transaction count
     count_phrases = [
         "how many transactions",
@@ -467,9 +493,7 @@ def handle_user_message(user_id, message):
         word in message_lower
         for word in ("save", "saving", "reduce", "cut", "less", "tip", "budget")
     )
-    budget_planning_question = is_budget_planning_question(message_lower)
-
-    if not budget_planning_question and (
+    if (
         any(p in message_lower for p in saving_phrases)
         or (saving_category and saving_action)
     ):
@@ -488,13 +512,8 @@ def handle_user_message(user_id, message):
 
     try:
         understood = understand_financial_question(message, transactions)
-        # A budget question may mention category names such as "income" or
-        # "expenses"; those words must not turn it into a transaction-list intent.
-        intent = "general" if budget_planning_question else understood.get("intent", "general")
-        requested_category = (
-            None if budget_planning_question
-            else understood.get("category") or detect_category(message)
-        )
+        intent = understood.get("intent", "general")
+        requested_category = understood.get("category") or detect_category(message)
         if isinstance(requested_category, str):
             requested_category = CATEGORY_ALIASES.get(
                 requested_category.lower(), requested_category
