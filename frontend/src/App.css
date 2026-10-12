@@ -1922,6 +1922,10 @@ align-items: start;
 gap: 16px;
 }
 
+.category-detail-layout-popup {
+grid-template-columns: minmax(0, 1fr);
+}
+
 .category-cards {
 display: grid;
 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1973,6 +1977,50 @@ margin-top: 0;
 
 .category-transactions-panel {
 min-height: 310px;
+}
+
+.category-popup-closed {
+display: none;
+}
+
+.category-popup-backdrop {
+position: fixed;
+inset: 0;
+z-index: 1000;
+border: 0;
+background: rgba(2, 7, 4, 0.76);
+backdrop-filter: blur(4px);
+}
+
+.category-popup-open {
+position: fixed;
+top: 50%;
+left: 50%;
+z-index: 1001;
+display: flex;
+width: min(860px, calc(100vw - 40px));
+max-height: min(82vh, 760px);
+min-height: 0;
+flex-direction: column;
+overflow: hidden;
+margin: 0;
+transform: translate(-50%, -50%);
+box-shadow: 0 24px 90px rgba(0, 0, 0, 0.55);
+}
+
+.category-popup-open .panel-heading {
+flex: 0 0 auto;
+}
+
+.category-popup-open .transaction-table-wrap {
+min-height: 0;
+overflow: auto;
+}
+
+.category-popup-open .category-popup-close {
+display: inline-flex;
+align-items: center;
+gap: 6px;
 }
 
 .category-transaction-name {
@@ -2463,6 +2511,12 @@ grid-template-columns: minmax(0, 1fr);
 
 .category-detail-layout {
 grid-template-columns: minmax(0, 1fr);
+}
+
+.category-popup-open {
+width: calc(100vw - 24px);
+max-height: 82vh;
+padding: 18px 14px;
 }
 
 .metric-filter-grid,

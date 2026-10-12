@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   ChartNoAxesCombined,
+  X,
   Activity,
   MessageCircle,
   Upload,
@@ -401,6 +402,15 @@ function App() {
       maxAmount: "",
     });
   }, [selectedMetric]);
+
+  useEffect(() => {
+    if (!selectedCategory) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setSelectedCategory(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [selectedCategory]);
 
   async function refreshStatementHistory() {
     const response = await fetch(`${API}/statements`, { credentials: "include" });
@@ -1835,7 +1845,7 @@ function App() {
                   </div>
 
                   {allCategoryEntries.length > 0 ? (
-                    <section className="category-detail-layout">
+                    <section className="category-detail-layout category-detail-layout-popup">
                       <div className="category-cards">
                         {allCategoryEntries.map((item, index) => (
                           <button
@@ -1862,7 +1872,20 @@ function App() {
                         ))}
                       </div>
 
-                      <section className="panel category-transactions-panel">
+                      {selectedCategory && (
+                        <button
+                          className="category-popup-backdrop"
+                          type="button"
+                          aria-label="Close category transactions"
+                          onClick={() => setSelectedCategory(null)}
+                        />
+                      )}
+                      <section
+                        className={`panel category-transactions-panel ${selectedCategory ? "category-popup-open" : "category-popup-closed"}`}
+                        role={selectedCategory ? "dialog" : undefined}
+                        aria-modal={selectedCategory ? "true" : undefined}
+                        aria-label={selectedCategory ? `${selectedCategory} transactions` : undefined}
+                      >
                         {selectedCategory ? (
                           <>
                             <div className="panel-heading">
@@ -1870,7 +1893,9 @@ function App() {
                                 <h2>{selectedCategory}</h2>
                                 <p>{selectedCategoryTransactions.length} transactions | {money(allCategoryEntries.find((item) => item.label === selectedCategory)?.amount)}</p>
                               </div>
-                              <button className="text-button" onClick={() => setSelectedCategory(null)}>Clear</button>
+                              <button className="text-button category-popup-close" onClick={() => setSelectedCategory(null)} aria-label="Close category transactions">
+                                <X size={18} /> Close
+                              </button>
                             </div>
                             {selectedCategoryTransactions.length > 0 ? (
                               <div className="transaction-table-wrap">
