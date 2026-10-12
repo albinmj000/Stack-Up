@@ -94,6 +94,17 @@ function getTransactionType(transaction) {
   return "expense";
 }
 
+function getTransactionFilterType(transaction) {
+  const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
+  if (["income", "expense", "transfer", "unknown"].includes(transactionType)) {
+    return transactionType;
+  }
+  const direction = String(transaction.type ?? "").toLowerCase();
+  if (direction === "credit") return "income";
+  if (direction === "debit") return "expense";
+  return "unknown";
+}
+
 function getAmountDirection(transaction) {
   const direction = String(transaction.type ?? "").toLowerCase();
   if (direction === "credit") return "income";
@@ -358,6 +369,14 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [metricFilters, setMetricFilters] = useState({
+    category: "all",
+    type: "all",
+    fromDate: "",
+    toDate: "",
+    minAmount: "",
+    maxAmount: "",
+  });
+  const [transactionFilters, setTransactionFilters] = useState({
     category: "all",
     type: "all",
     fromDate: "",
@@ -716,11 +735,30 @@ function App() {
   const hasRealData = Boolean(analysis);
   const recentTransactions = transactions.slice(-5).reverse();
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
-  const filteredTransactions = normalizedSearch
-    ? transactions.filter((transaction) => {
+  const transactionCategoryOptions = [...new Set(
+    transactions.map(getTransactionCategory)
+  )].sort((a, b) => a.localeCompare(b));
+  const transactionFiltersActive = Object.values(transactionFilters).some(
+    (value) => value !== "" && value !== "all"
+  );
+  const filteredTransactions = transactions.filter((transaction) => {
+    const category = getTransactionCategory(transaction);
+    const type = getTransactionFilterType(transaction);
+    const date = getTransactionDateKey(transaction.date ?? transaction.transaction_date);
+    const amount = getAmount(transaction);
+    const matchesFilters =
+      (transactionFilters.category === "all" || category === transactionFilters.category) &&
+      (transactionFilters.type === "all" || type === transactionFilters.type) &&
+      (!transactionFilters.fromDate || (date !== "Unknown date" && date >= transactionFilters.fromDate)) &&
+      (!transactionFilters.toDate || (date !== "Unknown date" && date <= transactionFilters.toDate)) &&
+      (transactionFilters.minAmount === "" || amount >= Number(transactionFilters.minAmount)) &&
+      (transactionFilters.maxAmount === "" || amount <= Number(transactionFilters.maxAmount));
+
+    if (!matchesFilters) return false;
+    if (normalizedSearch) {
         const searchableText = [
           getTransactionName(transaction),
-          getTransactionCategory(transaction),
+          category,
           transaction.description,
           transaction.merchant,
           transaction.narration,
@@ -729,15 +767,16 @@ function App() {
           transaction.date,
           transaction.transaction_date,
           formatDate(transaction.date ?? transaction.transaction_date),
-          getAmount(transaction),
-          money(getAmount(transaction)),
+          amount,
+          money(amount),
         ]
           .filter(Boolean)
           .join(" ")
           .toLocaleLowerCase();
         return searchableText.includes(normalizedSearch);
-      })
-    : transactions;
+    }
+    return true;
+  });
 
   const timelineByDate = new Map();
   transactions.forEach((transaction) => {
@@ -1459,11 +1498,7 @@ function App() {
               <div className="panel-heading">
                 <div>
                   <h2>Transactions</h2>
-                  <p>
-                    {normalizedSearch
-                      ? `Showing ${filteredTransactions.length} of ${transactions.length} matching transactions.`
-                      : `${transactions.length} transactions loaded. Select a category to correct it; your UPI choices are remembered for next time.`}
-                  </p>
+                  <p>{filteredTransactions.length} of {transactions.length} transactions shown. Select a category to correct it; your UPI choices are remembered for next time.</p>
                 </div>
                 <label className="upload-button">
                   <Upload size={17} /> Upload statement
@@ -1471,13 +1506,58 @@ function App() {
                 </label>
               </div>
 
+              {transactions.length > 0 && (
+                <div className="transaction-filter-grid" aria-label="Filter transactions">
+                  <label>
+                    <span>Category</span>
+                    <select value={transactionFilters.category} onChange={(event) => setTransactionFilters((current) => ({ ...current, category: event.target.value }))}>
+                      <option value="all">All categories</option>
+                      {transactionCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Type</span>
+                    <select value={transactionFilters.type} onChange={(event) => setTransactionFilters((current) => ({ ...current, type: event.target.value }))}>
+                      <option value="all">All types</option>
+                      <option value="income">Income</option>
+                      <option value="expense">Expense</option>
+                      <option value="transfer">Transfer</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Date from</span>
+                    <input type="date" value={transactionFilters.fromDate} onChange={(event) => setTransactionFilters((current) => ({ ...current, fromDate: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Date to</span>
+                    <input type="date" value={transactionFilters.toDate} onChange={(event) => setTransactionFilters((current) => ({ ...current, toDate: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Amount min (INR)</span>
+                    <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any" value={transactionFilters.minAmount} onChange={(event) => setTransactionFilters((current) => ({ ...current, minAmount: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Amount max (INR)</span>
+                    <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Any" value={transactionFilters.maxAmount} onChange={(event) => setTransactionFilters((current) => ({ ...current, maxAmount: event.target.value }))} />
+                  </label>
+                  {(transactionFiltersActive || normalizedSearch) && (
+                    <button className="metric-filter-reset" type="button" onClick={() => {
+                      setTransactionFilters({ category: "all", type: "all", fromDate: "", toDate: "", minAmount: "", maxAmount: "" });
+                      setSearchQuery("");
+                    }}>Clear filters</button>
+                  )}
+                </div>
+              )}
+
               {filteredTransactions.length > 0 ? (
                 <div className="transaction-table-wrap">
-                  <table>
+                  <table className="main-transactions-table">
                     <thead>
                       <tr>
-                        <th>TRANSACTION</th>
                         <th>CATEGORY</th>
+                        <th>TRANSACTION DETAILS</th>
+                        <th>TYPE</th>
                         <th>DATE</th>
                         <th className="amount-column">AMOUNT</th>
                       </tr>
@@ -1488,14 +1568,6 @@ function App() {
                         const amountDirection = getAmountDirection(transaction);
                         return (
                           <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
-                            <td>
-                              <div className="transaction-name">
-                                <span className={`transaction-symbol ${type}`}>
-                                  {type === "income" ? "↗" : "₹"}
-                                </span>
-                                <strong>{getTransactionName(transaction)}</strong>
-                              </div>
-                            </td>
                             <td>
                               <label className="category-editor">
                                 <span className="sr-only">Choose category for {getTransactionName(transaction)}</span>
@@ -1513,6 +1585,15 @@ function App() {
                                 </select>
                               </label>
                             </td>
+                            <td>
+                              <div className="transaction-name">
+                                <span className={`transaction-symbol ${type}`}>
+                                  {type === "income" ? "↗" : "₹"}
+                                </span>
+                                <strong>{getTransactionName(transaction)}</strong>
+                              </div>
+                            </td>
+                            <td className="date-cell">{getTransactionFilterType(transaction)}</td>
                             <td className="date-cell">
                               {formatDate(transaction.date ?? transaction.transaction_date)}
                             </td>
@@ -1527,8 +1608,11 @@ function App() {
                 </div>
               ) : transactions.length > 0 ? (
                 <div className="empty-state">
-                  <p>No transactions match “{searchQuery.trim()}”.</p>
-                  <button className="text-button" onClick={() => setSearchQuery("")}>Clear search</button>
+                  <p>No transactions match these filters or your search.</p>
+                  <button className="text-button" onClick={() => {
+                    setTransactionFilters({ category: "all", type: "all", fromDate: "", toDate: "", minAmount: "", maxAmount: "" });
+                    setSearchQuery("");
+                  }}>Clear filters</button>
                 </div>
               ) : (
                 <div className="empty-state">
