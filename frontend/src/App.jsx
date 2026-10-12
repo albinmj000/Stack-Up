@@ -385,12 +385,41 @@ function App() {
     minAmount: "",
     maxAmount: "",
   });
+  const [savingsGoals, setSavingsGoals] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("stackup:savings-goals") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [savingsGoalDraft, setSavingsGoalDraft] = useState("");
+  const [savingsGoalError, setSavingsGoalError] = useState("");
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const chatInputRef = useRef(null);
+  const savingsAccountKey = String(
+    account?.user_id ?? account?.id ?? account?.username ?? account?.email ?? account?.phone ?? ""
+  );
+
+  useEffect(() => {
+    if (savingsAccountKey) {
+      setSavingsGoalDraft(String(savingsGoals[savingsAccountKey] ?? ""));
+    } else {
+      setSavingsGoalDraft("");
+    }
+    setSavingsGoalError("");
+  }, [savingsAccountKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("stackup:savings-goals", JSON.stringify(savingsGoals));
+    } catch {
+      // The limit remains usable for this session when browser storage is unavailable.
+    }
+  }, [savingsGoals]);
 
   useEffect(() => {
     setMetricFilters({
@@ -741,6 +770,35 @@ function App() {
     analysis?.savings_rate ??
       (totalIncome > 0 ? (netCashFlow / totalIncome) * 100 : 0)
   );
+  const plannedSavings = Number(savingsGoals[savingsAccountKey] || 0);
+  const hasSavingsGoal = Object.prototype.hasOwnProperty.call(
+    savingsGoals,
+    savingsAccountKey
+  );
+  const spendingLimit = Math.max(0, totalIncome - plannedSavings);
+  const limitUsagePercent = spendingLimit > 0
+    ? (totalExpenses / spendingLimit) * 100
+    : totalExpenses > 0 ? 100 : 0;
+  const limitIntensity = limitUsagePercent < 50
+    ? "low"
+    : limitUsagePercent < 85 ? "medium" : "hard";
+  const remainingSpendingLimit = spendingLimit - totalExpenses;
+
+  function saveSavingsGoal(event) {
+    event.preventDefault();
+    const goal = Number(savingsGoalDraft);
+    if (!Number.isFinite(goal) || goal < 0) {
+      setSavingsGoalError("Enter a valid savings amount.");
+      return;
+    }
+    if (goal > totalIncome) {
+      setSavingsGoalError("Your savings goal cannot be greater than your total income.");
+      return;
+    }
+    setSavingsGoals((current) => ({ ...current, [savingsAccountKey]: goal }));
+    setSavingsGoalDraft(String(goal));
+    setSavingsGoalError("");
+  }
 
   const hasRealData = Boolean(analysis);
   const recentTransactions = transactions.slice(-5).reverse();
@@ -1194,6 +1252,83 @@ function App() {
                     <span style={{ width: `${Math.min(100, Math.max(0, savingsRate))}%` }} />
                   </div>
                 </button>
+              </section>
+
+              <section className={`panel savings-limit-panel limit-${limitIntensity}`}>
+                <div className="savings-limit-heading">
+                  <div>
+                    <div className="eyebrow"><span className="live-dot" /> SPENDING LIMITER</div>
+                    <h2>Set your savings target</h2>
+                    <p>Choose how much of this statement’s income you want to save. Stack Up calculates your spending limit.</p>
+                  </div>
+                  <span className={`limit-intensity-badge ${hasSavingsGoal ? limitIntensity : "unset"}`}>
+                    {hasSavingsGoal ? `${limitIntensity} intensity` : "Set a target"}
+                  </span>
+                </div>
+
+                <form className="savings-limit-form" onSubmit={saveSavingsGoal}>
+                  <label>
+                    <span>Total income</span>
+                    <strong>{hasRealData ? money(totalIncome) : "Upload a statement first"}</strong>
+                  </label>
+                  <label className="savings-goal-input">
+                    <span>Plan to save</span>
+                    <div>
+                      <span>₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={totalIncome}
+                        step="1"
+                        inputMode="numeric"
+                        placeholder="e.g. 10000"
+                        value={savingsGoalDraft}
+                        onChange={(event) => {
+                          setSavingsGoalDraft(event.target.value);
+                          setSavingsGoalError("");
+                        }}
+                        disabled={!hasRealData}
+                      />
+                    </div>
+                  </label>
+                  <button className="primary-button" type="submit" disabled={!hasRealData || !savingsAccountKey}>
+                    Set limit
+                  </button>
+                </form>
+
+                {savingsGoalError && <p className="savings-limit-error" role="alert">{savingsGoalError}</p>}
+
+                {hasSavingsGoal && (
+                  <div className="savings-limit-results">
+                    <div className="savings-limit-stats">
+                      <div><span>Spending limit</span><strong>{money(spendingLimit)}</strong></div>
+                      <div><span>Already spent</span><strong>{money(totalExpenses)}</strong></div>
+                      <div>
+                        <span>{remainingSpendingLimit >= 0 ? "Limit remaining" : "Over limit"}</span>
+                        <strong>{money(Math.abs(remainingSpendingLimit))}</strong>
+                      </div>
+                    </div>
+                    <div
+                      className="limit-progress-track"
+                      role="progressbar"
+                      aria-label="Spending limit used"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={Math.min(100, Math.max(0, limitUsagePercent))}
+                    >
+                      <span style={{ width: `${Math.min(100, Math.max(0, limitUsagePercent))}%` }} />
+                    </div>
+                    <p className="limit-intensity-message">
+                      <span className={`limit-traffic-light ${limitIntensity}`} aria-hidden="true" />
+                      {remainingSpendingLimit < 0
+                        ? `Hard: spending is ${money(Math.abs(remainingSpendingLimit))} over your limit.`
+                        : `${limitIntensity[0].toUpperCase()}${limitIntensity.slice(1)}: ${limitUsagePercent.toFixed(0)}% of your spending limit used.`}
+                    </p>
+                    <small>
+                      {money(totalIncome)} income − {money(plannedSavings)} planned savings = {money(spendingLimit)} available to spend.
+                    </small>
+                  </div>
+                )}
               </section>
 
               <section className="content-grid">
