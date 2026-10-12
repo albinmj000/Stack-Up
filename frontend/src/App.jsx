@@ -1364,6 +1364,11 @@ function App() {
                         ? `Hard: spending is ${money(Math.abs(remainingSpendingLimit))} over your limit.`
                         : `${limitIntensity[0].toUpperCase()}${limitIntensity.slice(1)}: ${limitUsagePercent.toFixed(0)}% of your spending limit used.`}
                     </p>
+                    <p className="limit-spend-guidance">
+                      {remainingSpendingLimit >= 0
+                        ? `You can spend ${money(remainingSpendingLimit)} more and still keep ${money(plannedSavings)} toward your savings goal.`
+                        : `You are ${money(Math.abs(remainingSpendingLimit))} over the limit. To still save ${money(plannedSavings)}, you need that much additional money or a lower savings goal.`}
+                    </p>
                     <small>
                       {openingBalance === null
                         ? "Opening balance could not be determined from this statement. "

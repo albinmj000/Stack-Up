@@ -967,6 +967,13 @@ color: #c6d4ca;
 font-size: 11px;
 }
 
+.limit-spend-guidance {
+margin: 0;
+color: #e8f0e9;
+font-size: 12px;
+line-height: 1.5;
+}
+
 .limit-traffic-light {
 width: 10px;
 height: 10px;
