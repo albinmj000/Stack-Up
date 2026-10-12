@@ -29,14 +29,14 @@ MODEL = "openai/gpt-oss-20b"
 
 def understand_financial_question(question, transactions):
     """Classify an unmatched question and answer it from transaction data."""
-    recent_transactions = transactions[-300:]
+    # Keep the prompt small enough for Groq's on-demand TPM budget. Use
+    # aggregates from the full statement, plus a compact sample of recent rows.
+    recent_transactions = transactions[-30:]
     transaction_context = [
         {
-            "id": transaction.get("id"),
             "date": transaction.get("date"),
-            "description": transaction.get("description"),
+            "description": str(transaction.get("description") or "")[:100],
             "amount_inr": transaction.get("amount"),
-            "balance_inr": transaction.get("balance"),
             "bank_direction": transaction.get("type"),
             "category": transaction.get("category"),
             "financial_type": transaction.get("transaction_type"),
@@ -44,6 +44,16 @@ def understand_financial_question(question, transactions):
         for transaction in recent_transactions
     ]
     omitted_count = max(0, len(transactions) - len(recent_transactions))
+    totals_by_category = {}
+    for transaction in transactions:
+        category = str(transaction.get("category") or "Other")[:40]
+        try:
+            amount = abs(float(transaction.get("amount") or 0))
+        except (TypeError, ValueError):
+            continue
+        totals_by_category[category] = round(
+            totals_by_category.get(category, 0) + amount, 2
+        )
     categories = [
         "Food", "Transport", "Shopping", "Bills & Utilities",
         "Entertainment", "Healthcare", "Loan / Credit", "Bank Charges",
@@ -65,15 +75,18 @@ Use a category from this list when one fits: {json.dumps(categories)}.
 Map category synonyms for every intent (for example commute, taxi, or fuel to Transport;
 groceries or dining to Food; power bill to Bills & Utilities).
 For general, write a concise answer grounded only in the data. Do not invent facts or totals.
-If data is insufficient, say so. Mention omitted older rows if they matter.
+Use the all-statement category totals for overall spending questions. Recent transaction
+details are only a sample; do not claim they represent the entire statement. If data is
+insufficient, say so.
 
 Return only JSON in this format:
 {{"intent":"general","category":null,"answer":"..."}}
 
 Question: {question}
 Saved transaction count: {len(transactions)}
-Older transactions omitted from details: {omitted_count}
-Transaction data: {json.dumps(transaction_context, ensure_ascii=False, default=str)}
+Recent transaction details omitted: {omitted_count}
+All-statement totals by category (INR): {json.dumps(totals_by_category, ensure_ascii=False, separators=(",", ":"))}
+Recent transaction sample: {json.dumps(transaction_context, ensure_ascii=False, default=str, separators=(",", ":"))}
 """
     response = get_client().chat.completions.create(
         model=MODEL,
