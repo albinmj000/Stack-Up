@@ -1,3 +1,5 @@
+import re
+
 from database.database import get_connection
 
 
@@ -28,7 +30,26 @@ def get_correction(user_id, merchant):
 
 
 def find_correction_for_description(user_id, description):
-    description_lower = str(description or "").lower()
+    parts = [
+        part.strip()
+        for part in re.split(r"[/\\]", str(description or ""))
+    ]
+    counterparty = ""
+    for index, part in enumerate(parts[:-1]):
+        if part.upper() != "UPI":
+            continue
+
+        next_part = parts[index + 1]
+        if next_part.upper() in {"P2M", "P2A", "P2P", "P2B"}:
+            if index + 3 < len(parts):
+                counterparty = parts[index + 3]
+        else:
+            counterparty = next_part
+        break
+
+    if not counterparty:
+        return None
+
     with get_connection() as connection:
         corrections = connection.execute(
             """
@@ -41,6 +62,9 @@ def find_correction_for_description(user_id, description):
 
     for correction in corrections:
         merchant = correction["merchant"]
-        if merchant.lower() in description_lower:
+        # Match the actual UPI counterparty exactly. Substring matching can
+        # apply a saved correction for the payment mode (for example P2M) to
+        # every unrelated UPI transaction.
+        if merchant.strip().casefold() == counterparty.casefold():
             return {"merchant": merchant, "category": correction["category"]}
     return None
