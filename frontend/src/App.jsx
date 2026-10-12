@@ -357,12 +357,31 @@ function App() {
   const [analysis, setAnalysis] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
+  const [metricFilters, setMetricFilters] = useState({
+    category: "all",
+    type: "all",
+    fromDate: "",
+    toDate: "",
+    minAmount: "",
+    maxAmount: "",
+  });
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const chatInputRef = useRef(null);
+
+  useEffect(() => {
+    setMetricFilters({
+      category: "all",
+      type: "all",
+      fromDate: "",
+      toDate: "",
+      minAmount: "",
+      maxAmount: "",
+    });
+  }, [selectedMetric]);
 
   async function refreshStatementHistory() {
     const response = await fetch(`${API}/statements`, { credentials: "include" });
@@ -811,6 +830,28 @@ function App() {
       : [...incomeTransactions, ...expenseTransactions].sort(
           (a, b) => (b.id ?? 0) - (a.id ?? 0)
         );
+  const metricCategoryOptions = [...new Set(
+    selectedMetricTransactions.map(getAnalyticsCategory)
+  )].sort((a, b) => a.localeCompare(b));
+  const filteredMetricTransactions = selectedMetricTransactions.filter((transaction) => {
+    const category = getAnalyticsCategory(transaction);
+    const type = String(
+      transaction.transaction_type || getTransactionType(transaction)
+    ).toLowerCase();
+    const date = getTransactionDateKey(transaction.date ?? transaction.transaction_date);
+    const amount = getAmount(transaction);
+    return (
+      (metricFilters.category === "all" || category === metricFilters.category) &&
+      (metricFilters.type === "all" || type === metricFilters.type) &&
+      (!metricFilters.fromDate || (date !== "Unknown date" && date >= metricFilters.fromDate)) &&
+      (!metricFilters.toDate || (date !== "Unknown date" && date <= metricFilters.toDate)) &&
+      (metricFilters.minAmount === "" || amount >= Number(metricFilters.minAmount)) &&
+      (metricFilters.maxAmount === "" || amount <= Number(metricFilters.maxAmount))
+    );
+  });
+  const metricFiltersActive = Object.values(metricFilters).some(
+    (value) => value !== "" && value !== "all"
+  );
 
   const metricDetails = {
     net_cash_flow: {
@@ -1580,20 +1621,98 @@ function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>Transactions included</h2>
-                      <p>{selectedMetricTransactions.length} transactions used in this calculation</p>
+                      <p>{metricFiltersActive
+                        ? `${filteredMetricTransactions.length} of ${selectedMetricTransactions.length} transactions match these filters`
+                        : `${selectedMetricTransactions.length} transactions used in this calculation`}</p>
                     </div>
                   </div>
-                  {selectedMetricTransactions.length > 0 ? (
+                  {selectedMetricTransactions.length > 0 && (
+                    <div className="metric-filter-grid" aria-label="Filter included transactions">
+                      <label>
+                        <span>Category</span>
+                        <select
+                          value={metricFilters.category}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, category: event.target.value }))}
+                        >
+                          <option value="all">All categories</option>
+                          {metricCategoryOptions.map((category) => (
+                            <option key={category} value={category}>{category}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Type</span>
+                        <select
+                          value={metricFilters.type}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, type: event.target.value }))}
+                        >
+                          <option value="all">All types</option>
+                          <option value="income">Income</option>
+                          <option value="expense">Expense</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>Date from</span>
+                        <input
+                          type="date"
+                          value={metricFilters.fromDate}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, fromDate: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        <span>Date to</span>
+                        <input
+                          type="date"
+                          value={metricFilters.toDate}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, toDate: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        <span>Amount min (₹)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder="Any"
+                          value={metricFilters.minAmount}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, minAmount: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        <span>Amount max (₹)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder="Any"
+                          value={metricFilters.maxAmount}
+                          onChange={(event) => setMetricFilters((current) => ({ ...current, maxAmount: event.target.value }))}
+                        />
+                      </label>
+                      {metricFiltersActive && (
+                        <button
+                          className="metric-filter-reset"
+                          type="button"
+                          onClick={() => setMetricFilters({ category: "all", type: "all", fromDate: "", toDate: "", minAmount: "", maxAmount: "" })}
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {filteredMetricTransactions.length > 0 ? (
                     <div className="transaction-table-wrap">
-                      <table>
-                        <thead><tr><th>TRANSACTION</th><th>CATEGORY</th><th>TYPE</th><th>DATE</th><th className="amount-column">AMOUNT</th></tr></thead>
+                      <table className="metric-transactions-table">
+                        <thead><tr><th>CATEGORY</th><th>TRANSACTION DETAILS</th><th>TYPE</th><th>DATE</th><th className="amount-column">AMOUNT</th></tr></thead>
                         <tbody>
-                          {selectedMetricTransactions.map((transaction, index) => {
+                          {filteredMetricTransactions.map((transaction, index) => {
                             const amountDirection = getAmountDirection(transaction);
                             return (
                               <tr key={transaction.id ?? `${transaction.description}-${index}`}>
+                                <td><span className="category-pill">{getAnalyticsCategory(transaction)}</span></td>
                                 <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
-                                <td><span className="category-pill">{getTransactionCategory(transaction)}</span></td>
                                 <td className="date-cell">{transaction.transaction_type}</td>
                                 <td className="date-cell">{formatDate(transaction.date)}</td>
                                 <td className={`amount-cell ${amountDirection}`}>
@@ -1606,7 +1725,7 @@ function App() {
                       </table>
                     </div>
                   ) : (
-                    <div className="empty-category-detail"><p>No transactions contribute to this calculation yet.</p></div>
+                    <div className="empty-category-detail"><p>{selectedMetricTransactions.length > 0 ? "No transactions match these filters." : "No transactions contribute to this calculation yet."}</p></div>
                   )}
                 </section>
               </>

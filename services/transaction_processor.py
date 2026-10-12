@@ -86,9 +86,19 @@ def extract_counterparty(description):
     """Extract clean entity/merchant or person name from UPI narration."""
     if not description:
         return ""
-    match = re.search(r"UPI\s*/\s*([^/]+)", str(description), re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
+    parts = [part.strip() for part in re.split(r"[/\\]", str(description))]
+    for index, part in enumerate(parts[:-1]):
+        if part.upper() != "UPI":
+            continue
+
+        next_part = parts[index + 1]
+        if next_part.upper() in {"P2M", "P2A", "P2P", "P2B"}:
+            # Axis and other bank narrations commonly use
+            # UPI/P2M/<reference>/<merchant>/UPI/<bank>.
+            if index + 3 < len(parts):
+                return parts[index + 3].strip()
+        else:
+            return next_part.strip()
     return str(description).strip()
 
 
