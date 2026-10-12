@@ -76,6 +76,27 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(saved[0]["description"], "Cafe")
         self.assertEqual(database.get_statement_pdf("user-a", statement_id)["pdf_data"], b"pdf-data")
 
+    def test_delete_statement_removes_only_owned_statement_and_transactions(self):
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "Cafe",
+            "amount": 125.0,
+            "type": "debit",
+            "balance": 875.0,
+            "category": "Food",
+            "transaction_type": "expense",
+        }
+        statement_id, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "statement.pdf", [transaction], b"pdf-data",
+        )
+
+        self.assertFalse(database.delete_user_statement("user-b", statement_id))
+        self.assertIsNotNone(database.get_statement("user-a", statement_id))
+        self.assertTrue(database.delete_user_statement("user-a", statement_id))
+        self.assertIsNone(database.get_statement("user-a", statement_id))
+        self.assertEqual(database.get_statement_transactions("user-a", statement_id), [])
+
     def test_merchant_corrections_are_account_scoped(self):
         save_correction("user-a", "cafe", "Food")
         save_correction("user-a", "cafe", "Entertainment")

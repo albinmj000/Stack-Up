@@ -17,6 +17,7 @@ import {
   CircleHelp,
   History,
   Download,
+  Trash2,
   LogOut,
 } from "lucide-react";
 import stackUpLogo from "./assets/stackup-logo.svg";
@@ -366,6 +367,8 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [statements, setStatements] = useState([]);
+  const [activeStatementId, setActiveStatementId] = useState(null);
+  const [aiStatementIds, setAiStatementIds] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
@@ -445,14 +448,23 @@ function App() {
     const response = await fetch(`${API}/statements`, { credentials: "include" });
     if (!response.ok) throw new Error("Could not load statement history.");
     const result = await readApiResponse(response);
-    setStatements(Array.isArray(result.statements) ? result.statements : []);
-    return Array.isArray(result.statements) ? result.statements : [];
+    const nextStatements = Array.isArray(result.statements) ? result.statements : [];
+    setStatements(nextStatements);
+    setAiStatementIds((current) => {
+      const available = new Set(nextStatements.map((statement) => statement.statement_id));
+      const stillAvailable = current.filter((id) => available.has(id));
+      return stillAvailable.length ? stillAvailable : nextStatements[0] ? [nextStatements[0].statement_id] : [];
+    });
+    return nextStatements;
   }
 
   async function loadSavedStatement(statementId) {
     const response = await fetch(`${API}/statements/${statementId}`, { credentials: "include" });
     const result = await readApiResponse(response);
     if (!response.ok) throw new Error(result.detail || "Could not load this statement.");
+    setActiveStatementId(result.statement_id ?? statementId);
+    setAiStatementIds([result.statement_id ?? statementId]);
+    setMessages([]);
     setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
     setAnalysis(result.analysis ?? null);
     setActivePage("Dashboard");
@@ -474,6 +486,7 @@ function App() {
       if (history.length > 0) await loadSavedStatement(history[0].statement_id);
       else {
         setTransactions([]);
+        setActiveStatementId(null);
         setAnalysis(null);
         setActivePage("Dashboard");
       }
@@ -492,6 +505,7 @@ function App() {
       setRememberedAccounts([]);
       setTransactions([]);
       setStatements([]);
+      setActiveStatementId(null);
       setAnalysis(null);
       setMessages([]);
       setQuestion("");
@@ -542,6 +556,7 @@ function App() {
       setAccount(null);
       setTransactions([]);
       setStatements([]);
+      setActiveStatementId(null);
       setAnalysis(null);
       setMessages([]);
       setQuestion("");
@@ -580,6 +595,7 @@ function App() {
           );
           if (statementResponse.ok) {
             const statementResult = await readApiResponse(statementResponse);
+            setActiveStatementId(statementResult.statement_id ?? history[0].statement_id);
             setTransactions(statementResult.transactions ?? []);
             setAnalysis(statementResult.analysis ?? null);
           }
@@ -673,6 +689,11 @@ function App() {
       }
 
       if (result.status === "duplicate") {
+        if (result.statement_id != null) {
+          setActiveStatementId(result.statement_id);
+          setAiStatementIds([result.statement_id]);
+          setMessages([]);
+        }
         setNotice(result.message || "This statement was already uploaded.");
         return;
       }
@@ -682,6 +703,9 @@ function App() {
       }
 
       setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
+      setActiveStatementId(result.statement_id ?? null);
+      setAiStatementIds(result.statement_id != null ? [result.statement_id] : []);
+      setMessages([]);
       setAnalysis(result.analysis ?? null);
       try {
         await refreshStatementHistory();
@@ -704,6 +728,10 @@ function App() {
 
   async function askQuestion(text) {
     if (!text || asking) return;
+    if (statements.length > 0 && aiStatementIds.length === 0) {
+      setError("Select at least one statement for the AI assistant.");
+      return;
+    }
 
     setMessages((previous) => [...previous, { role: "user", text }]);
     setQuestion("");
@@ -714,6 +742,7 @@ function App() {
       const params = new URLSearchParams({
         message: text,
       });
+      aiStatementIds.forEach((statementId) => params.append("statement_ids", String(statementId)));
 
       const response = await fetch(`${API}/message?${params.toString()}`, {
         method: "POST",
@@ -753,6 +782,38 @@ function App() {
       ]);
     } finally {
       setAsking(false);
+    }
+  }
+
+  async function deleteStatement(statement) {
+    const statementId = statement.statement_id;
+    const filename = statement.filename || "this statement";
+    if (!window.confirm(`Delete ${filename} and its saved transactions? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(`${API}/statements/${statementId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok) throw new Error(result.detail || "Could not delete this statement.");
+
+      const remaining = await refreshStatementHistory();
+      setAiStatementIds((current) => current.filter((id) => id !== statementId));
+      if (activeStatementId === statementId) {
+        if (remaining.length > 0) {
+          await loadSavedStatement(remaining[0].statement_id);
+        } else {
+          setActiveStatementId(null);
+          setTransactions([]);
+          setAnalysis(null);
+          setMessages([]);
+        }
+      }
+      setNotice(`${filename} deleted from statement history.`);
+      setError("");
+    } catch (deleteError) {
+      setError(deleteError.message);
     }
   }
 
@@ -1853,6 +1914,15 @@ function App() {
                           <span>PDF</span>
                         </a>
                       )}
+                      <button
+                        className="statement-history-delete"
+                        type="button"
+                        onClick={() => deleteStatement(statement)}
+                        aria-label={`Delete ${statement.filename || "bank statement"}`}
+                        title="Delete statement and its transactions"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -2130,8 +2200,35 @@ function App() {
               <div className="chat-welcome">
                 <span className="chat-logo"><Sparkles size={24} /></span>
                 <h2>Meet your money assistant.</h2>
-                <p>Ask questions about your spending, habits, and savings opportunities.</p>
+                <p>Choose one or more statements. Answers will use only the selected statements.</p>
               </div>
+
+              {statements.length > 0 && (
+                <div className="ai-statement-picker">
+                  <strong>Analyze these statements</strong>
+                  <div className="ai-statement-options">
+                    {statements.map((statement) => (
+                      <label key={statement.statement_id}>
+                        <input
+                          type="checkbox"
+                          checked={aiStatementIds.includes(statement.statement_id)}
+                          onChange={(event) => {
+                            setAiStatementIds((current) => event.target.checked
+                              ? [...current, statement.statement_id]
+                              : current.filter((id) => id !== statement.statement_id));
+                            setMessages([]);
+                            setError("");
+                          }}
+                        />
+                        <span>
+                          <strong>{statement.filename || "Bank statement"}</strong>
+                          <small>{formatDate(statement.created_at)} · {statement.transaction_count} transactions</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="suggestion-grid">
                 {[

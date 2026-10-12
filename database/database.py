@@ -649,6 +649,20 @@ def get_statement(user_id, statement_id):
     return dict(row) if row else None
 
 
+def delete_user_statement(user_id, statement_id):
+    """Delete one owned statement and all of its saved transactions."""
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM transactions WHERE user_id = ? AND statement_id = ?",
+            (user_id, statement_id),
+        )
+        cursor = connection.execute(
+            "DELETE FROM statements WHERE user_id = ? AND id = ?",
+            (user_id, statement_id),
+        )
+        return cursor.rowcount > 0
+
+
 def _insert_transactions(connection, user_id, statement_id, transactions):
     for transaction in transactions:
         connection.execute("""

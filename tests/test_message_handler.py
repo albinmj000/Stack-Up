@@ -60,47 +60,100 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(result["data"], {"count": 2, "total": 1550.0})
         self.assertIn("transfers excluded", result["message"])
 
-    @patch.object(message_handler, "get_transaction_count", return_value=17)
-    def test_transaction_count_question(self, _count):
+    @patch.object(message_handler, "get_user_transactions")
+    def test_transaction_count_question(self, get_transactions):
+        get_transactions.return_value = [{"id": index} for index in range(17)]
         result = message_handler.handle_user_message("user-1", "How many transactions do I have?")
         self.assertEqual(result["data"]["transaction_count"], 17)
 
-    @patch.object(message_handler, "get_transaction_totals")
-    def test_total_expenses_question(self, totals):
-        totals.return_value = {"total_income": 20000, "total_expenses": 5000}
+    @patch.object(message_handler, "get_user_transactions")
+    def test_total_expenses_question(self, get_transactions):
+        get_transactions.return_value = [
+            {"amount": 5000, "type": "debit", "transaction_type": "expense"},
+            {"amount": 20000, "type": "credit", "transaction_type": "income"},
+        ]
         result = message_handler.handle_user_message("user-1", "What are my total expenses?")
         self.assertEqual(result["data"]["total_expenses"], 5000)
 
-    @patch.object(message_handler, "get_category_total", return_value=1250)
-    def test_category_total_question(self, total):
+    @patch.object(message_handler, "get_user_transactions")
+    def test_category_total_question(self, get_transactions):
+        get_transactions.return_value = [
+            {"amount": 1250, "category": "Food", "type": "debit", "transaction_type": "expense"},
+            {"amount": 300, "category": "Transport", "type": "debit", "transaction_type": "expense"},
+        ]
         result = message_handler.handle_user_message("user-1", "How much did I spend on Food?")
-        total.assert_called_once_with("user-1", "Food")
         self.assertEqual(result["data"]["amount"], 1250)
 
-    @patch.object(message_handler, "get_transactions_by_category")
-    def test_list_category_question(self, rows):
-        rows.return_value = [{"id": 1, "category": "Food"}, {"id": 2, "category": "Food"}]
+    @patch.object(message_handler, "get_user_transactions")
+    def test_list_category_question(self, get_transactions):
+        get_transactions.return_value = [
+            {"id": 1, "category": "Food"},
+            {"id": 2, "category": "Food"},
+            {"id": 3, "category": "Transport"},
+        ]
         result = message_handler.handle_user_message("user-1", "Show all Food transactions")
         self.assertEqual(result["type"], "category_transactions")
         self.assertEqual(len(result["transactions"]), 2)
 
-    @patch.object(message_handler, "format_statement_summary")
-    def test_statement_summary_question(self, summary):
-        summary.return_value = (["Income: INR 1000"], {"Food": 50})
+    @patch.object(message_handler, "get_user_transactions")
+    def test_statement_summary_question(self, get_transactions):
+        get_transactions.return_value = [
+            {"amount": 1000, "type": "credit", "transaction_type": "income", "category": "Income"},
+            {"amount": 50, "type": "debit", "transaction_type": "expense", "category": "Food"},
+        ]
         result = message_handler.handle_user_message("user-1", "Summarize my statement")
-        self.assertEqual(result["message"], "Income: INR 1000")
+        self.assertIn("INR 1,000.00", result["message"])
+        self.assertIn("Food: INR 50.00", result["message"])
 
-    @patch.object(message_handler, "format_saving_guidance")
-    def test_quick_saving_question(self, guidance):
-        guidance.return_value = {"message": "Review your largest categories.", "suggestions": []}
+    @patch.object(message_handler, "get_user_transactions")
+    def test_quick_saving_question(self, get_transactions):
+        get_transactions.return_value = [
+            {"amount": 200, "type": "debit", "transaction_type": "expense", "category": "Food", "description": "Cafe"},
+        ]
         result = message_handler.handle_user_message("user-1", "How can I save more?")
         self.assertEqual(result["type"], "saving_guidance")
-        guidance.assert_called_once_with("user-1", None)
+        self.assertIn("Food", result["message"])
 
     @patch.object(message_handler, "get_user_transactions", return_value=[])
     def test_general_question_without_statement(self, _transactions):
         result = message_handler.handle_user_message("user-1", "Can you help me plan?")
         self.assertIn("Upload a bank statement first", result["message"])
+
+    @patch.object(message_handler, "get_user_transactions")
+    @patch.object(message_handler, "get_statement_transactions")
+    def test_statement_id_scopes_all_question_results(self, scoped_rows, all_rows):
+        scoped_rows.return_value = [
+            {"id": 10, "amount": 75, "type": "debit", "transaction_type": "expense", "category": "Food"},
+        ]
+        all_rows.return_value = [
+            {"id": 10, "amount": 75, "type": "debit", "transaction_type": "expense", "category": "Food"},
+            {"id": 11, "amount": 500, "type": "debit", "transaction_type": "expense", "category": "Food"},
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1", "What are my total expenses?", statement_id=22
+        )
+
+        scoped_rows.assert_called_once_with("user-1", 22)
+        all_rows.assert_not_called()
+        self.assertEqual(result["data"]["total_expenses"], 75)
+
+    @patch.object(message_handler, "get_statement_transactions")
+    def test_multiple_statement_ids_combine_only_selected_statements(self, scoped_rows):
+        scoped_rows.side_effect = [
+            [{"amount": 75, "type": "debit", "transaction_type": "expense", "category": "Food"}],
+            [{"amount": 125, "type": "debit", "transaction_type": "expense", "category": "Food"}],
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1", "What are my total expenses?", statement_ids=[22, 23]
+        )
+
+        self.assertEqual(result["data"]["total_expenses"], 200)
+        self.assertEqual(
+            [call.args for call in scoped_rows.call_args_list],
+            [("user-1", 22), ("user-1", 23)],
+        )
 
 
 class FinancialQuestionPromptTests(unittest.TestCase):

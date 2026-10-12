@@ -1734,6 +1734,83 @@ color: #e1f9e8;
 background: #203b2a;
 }
 
+.statement-history-delete {
+display: grid;
+width: 36px;
+height: 36px;
+flex-shrink: 0;
+place-items: center;
+border: 1px solid #593b3b;
+border-radius: 7px;
+color: #e88c8c;
+background: transparent;
+cursor: pointer;
+}
+
+.statement-history-delete:hover {
+color: #fff;
+background: #6a3030;
+}
+
+.ai-statement-picker {
+display: grid;
+gap: 12px;
+margin: 18px 0;
+padding: 15px;
+border: 1px solid #26372c;
+border-radius: 12px;
+background: #0e1711;
+}
+
+.ai-statement-picker > strong {
+color: #e0e9e2;
+font-size: 12px;
+}
+
+.ai-statement-options {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+gap: 8px;
+max-height: 190px;
+overflow-y: auto;
+}
+
+.ai-statement-options label {
+display: flex;
+align-items: flex-start;
+gap: 9px;
+min-width: 0;
+padding: 10px;
+border: 1px solid #26372c;
+border-radius: 8px;
+color: #c7d4ca;
+background: #101b14;
+cursor: pointer;
+}
+
+.ai-statement-options input {
+margin-top: 2px;
+accent-color: #62dda0;
+}
+
+.ai-statement-options label > span {
+display: grid;
+min-width: 0;
+gap: 5px;
+}
+
+.ai-statement-options label strong {
+overflow: hidden;
+font-size: 11px;
+text-overflow: ellipsis;
+white-space: nowrap;
+}
+
+.ai-statement-options label small {
+color: #829087;
+font-size: 10px;
+}
+
 .statement-history-icon {
 display: grid;
 width: 36px;

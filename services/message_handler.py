@@ -2,15 +2,8 @@ import re
 
 from services.correction_parser import process_correction_message
 from services.ai_assistant import understand_financial_question
-from database.database import get_user_transactions
-
-from services.transaction_query import (
-    get_transaction_count,
-    get_category_total,
-    get_transaction_totals,
-    get_spending_summary,
-    get_transactions_by_category,
-)
+from database.database import get_statement_transactions, get_user_transactions
+from services.transaction_processor import rule_based_category
 
 
 CATEGORY_ALIASES = {
@@ -93,9 +86,71 @@ def requested_transaction_limit(message, default=10):
     return min(50, max(1, int(match.group(1))))
 
 
-def format_statement_summary(user_id):
-    totals = get_transaction_totals(user_id)
-    spending = get_spending_summary(user_id)
+def transaction_totals(transactions):
+    totals = {
+        "total_income": 0.0,
+        "total_expenses": 0.0,
+        "total_transfer_in": 0.0,
+        "total_transfer_out": 0.0,
+        "total_unknown": 0.0,
+    }
+    for transaction in transactions:
+        amount = abs(float(transaction.get("amount") or 0))
+        transaction_type = str(
+            transaction.get("transaction_type") or "unknown"
+        ).lower()
+        direction = str(transaction.get("type") or "").lower()
+        if transaction_type == "income":
+            totals["total_income"] += amount
+        elif transaction_type == "expense":
+            totals["total_expenses"] += amount
+        elif transaction_type == "transfer":
+            if direction == "credit":
+                totals["total_transfer_in"] += amount
+            elif direction == "debit":
+                totals["total_transfer_out"] += amount
+        else:
+            totals["total_unknown"] += amount
+    return {name: round(value, 2) for name, value in totals.items()}
+
+
+def spending_summary(transactions):
+    totals = {}
+    for transaction in transactions:
+        description = str(transaction.get("description") or "")
+        if (
+            "upi" in description.lower()
+            and rule_based_category(transaction)
+            in ("Transfer", "UPI Sent", "UPI Received")
+        ):
+            continue
+        if str(transaction.get("transaction_type") or "").lower() != "expense":
+            continue
+        category = transaction.get("category") or "Other"
+        totals[category] = totals.get(category, 0.0) + abs(
+            float(transaction.get("amount") or 0)
+        )
+    return {name: round(amount, 2) for name, amount in totals.items()}
+
+
+def category_transactions(transactions, category):
+    return [
+        transaction for transaction in transactions
+        if str(transaction.get("category") or "Other").lower() == category.lower()
+    ]
+
+
+def category_total(transactions, category):
+    return round(sum(
+        abs(float(transaction.get("amount") or 0))
+        for transaction in category_transactions(transactions, category)
+    ), 2)
+
+
+def format_statement_summary(user_id, transactions=None):
+    transactions = transactions if transactions is not None else get_user_transactions(user_id)
+    totals = transaction_totals(transactions)
+    spending = spending_summary(transactions)
     net = totals["total_income"] - totals["total_expenses"]
 
     lines = [
@@ -122,8 +177,9 @@ def format_statement_summary(user_id):
     return lines, spending
 
 
-def format_saving_guidance(user_id, focus_category=None):
-    spending = get_spending_summary(user_id)
+def format_saving_guidance(user_id, focus_category=None, transactions=None):
+    transactions = transactions if transactions is not None else get_user_transactions(user_id)
+    spending = spending_summary(transactions)
     if not spending:
         return {
             "message": (
@@ -201,7 +257,7 @@ def format_saving_guidance(user_id, focus_category=None):
         "suggestions": suggestions,
         "follow_up_questions": follow_ups,
     }
-def handle_user_message(user_id, message):
+def handle_user_message(user_id, message, statement_id=None, statement_ids=None):
     message_lower = message.lower().strip()
 
     # 1. Corrections
@@ -218,11 +274,22 @@ def handle_user_message(user_id, message):
             "category": correction["category"],
         }
 
+    selected_statement_ids = statement_ids or (
+        [statement_id] if statement_id is not None else None
+    )
+    if selected_statement_ids is None:
+        transactions = get_user_transactions(user_id)
+    else:
+        transactions = [
+            transaction
+            for selected_id in selected_statement_ids
+            for transaction in get_statement_transactions(user_id, selected_id)
+        ]
+
     # Budget-planning questions need the AI to understand the whole request
     # before words like "income" or "expenses" can trigger category shortcuts.
     budget_planning_question = is_budget_planning_question(message_lower)
     if budget_planning_question:
-        transactions = get_user_transactions(user_id)
         if not transactions:
             return {
                 "type": "query",
@@ -254,7 +321,7 @@ def handle_user_message(user_id, message):
     ]
 
     if any(p in message_lower for p in count_phrases):
-        count = get_transaction_count(user_id)
+        count = len(transactions)
         return {
             "type": "query",
             "message": f"You have {count} transactions.",
@@ -272,7 +339,7 @@ def handle_user_message(user_id, message):
         any(term in message_lower for term in ranking_terms)
         and any(term in message_lower for term in transaction_terms)
     ):
-        rows = get_user_transactions(user_id)
+        rows = transactions
         expenses = [
             row for row in rows
             if str(row.get("transaction_type") or "").lower() == "expense"
@@ -319,8 +386,7 @@ def handle_user_message(user_id, message):
     ]
 
     if any(p in message_lower for p in highest_spending_phrases):
-        # get_spending_summary returns {category: amount, ...}
-        category_totals = get_spending_summary(user_id)
+        category_totals = spending_summary(transactions)
 
         if not category_totals:
             return {
@@ -392,7 +458,7 @@ def handle_user_message(user_id, message):
     ]
 
     if any(p in message_lower for p in income_phrases):
-        totals = get_transaction_totals(user_id)
+        totals = transaction_totals(transactions)
         income = totals["total_income"]
 
         return {
@@ -417,7 +483,7 @@ def handle_user_message(user_id, message):
         any(p in message_lower for p in expense_phrases)
         and category is None
     ):
-        totals = get_transaction_totals(user_id)
+        totals = transaction_totals(transactions)
         expenses = totals["total_expenses"]
 
         return {
@@ -437,7 +503,7 @@ def handle_user_message(user_id, message):
     ]
 
     if any(p in message_lower for p in transfer_phrases):
-        totals = get_transaction_totals(user_id)
+        totals = transaction_totals(transactions)
         transfer_total = (
             totals["total_transfer_in"]
             + totals["total_transfer_out"]
@@ -459,7 +525,7 @@ def handle_user_message(user_id, message):
         "transaction", "details", "breakdown",
     )
     if category and any(intent in message_lower for intent in list_intents):
-        matching = get_transactions_by_category(user_id, category)
+        matching = category_transactions(transactions, category)
         matching.reverse()
         return {
             "type": "category_transactions",
@@ -484,7 +550,7 @@ def handle_user_message(user_id, message):
         keyword in message_lower
         for keyword in ("save", "saving", "reduce", "cut", "less", "tip", "budget")
     ):
-        total = get_category_total(user_id, category)
+        total = category_total(transactions, category)
 
         return {
             "type": "query",
@@ -512,7 +578,7 @@ def handle_user_message(user_id, message):
     ]
 
     if any(p in message_lower for p in summary_phrases):
-        summary_lines, spending = format_statement_summary(user_id)
+        summary_lines, spending = format_statement_summary(user_id, transactions)
 
         return {
             "type": "query",
@@ -547,11 +613,10 @@ def handle_user_message(user_id, message):
     ):
         return {
             "type": "saving_guidance",
-            **format_saving_guidance(user_id, saving_category),
+            **format_saving_guidance(user_id, saving_category, transactions),
         }
 
     # 10. Natural-language questions not covered by exact calculations.
-    transactions = get_user_transactions(user_id)
     if not transactions:
         return {
             "type": "query",
@@ -575,7 +640,7 @@ def handle_user_message(user_id, message):
         }
 
         if intent == "list_category" and requested_category in valid_categories:
-            matching = get_transactions_by_category(user_id, requested_category)
+            matching = category_transactions(transactions, requested_category)
             matching.reverse()
             return {
                 "type": "category_transactions",
@@ -589,7 +654,7 @@ def handle_user_message(user_id, message):
             }
 
         if intent == "category_total" and requested_category in valid_categories:
-            total = get_category_total(user_id, requested_category)
+            total = category_total(transactions, requested_category)
             return {
                 "type": "query",
                 "message": f"Your total for {requested_category} is INR {total:,.2f}.",
@@ -597,7 +662,7 @@ def handle_user_message(user_id, message):
             }
 
         if intent == "summary":
-            summary_lines, spending = format_statement_summary(user_id)
+            summary_lines, spending = format_statement_summary(user_id, transactions)
             return {
                 "type": "query",
                 "message": "\n".join(summary_lines),

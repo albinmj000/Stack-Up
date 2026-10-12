@@ -41,6 +41,7 @@ from database.database import (
     save_statement_pdf,
     get_user_transactions,
     list_user_statements,
+    delete_user_statement,
     get_account_by_contact,
     get_account_by_username,
     add_account_credentials,
@@ -483,9 +484,18 @@ async def whatsapp_webhook(request: Request):
 
 
 @app.post("/message")
-async def receive_message(request: Request, message: str):
+async def receive_message(
+    request: Request,
+    message: str,
+    statement_id: int | None = None,
+    statement_ids: list[int] | None = Query(default=None),
+):
     user_id = authenticated_account(request)["user_id"]
-    return handle_user_message(user_id, message)
+    selected_ids = list(dict.fromkeys(statement_ids or ([] if statement_id is None else [statement_id])))
+    for selected_id in selected_ids:
+        if get_statement(user_id, selected_id) is None:
+            raise HTTPException(status_code=404, detail="Statement not found for this account.")
+    return handle_user_message(user_id, message, statement_ids=selected_ids or None)
 
 
 @app.patch("/transactions/{transaction_id}/category")
@@ -570,6 +580,14 @@ async def load_statement_from_history(statement_id: int, request: Request):
     if result is None:
         raise HTTPException(status_code=404, detail="Statement not found for this account.")
     return result
+
+
+@app.delete("/statements/{statement_id}")
+async def delete_statement_from_history(statement_id: int, request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    if not delete_user_statement(user_id, statement_id):
+        raise HTTPException(status_code=404, detail="Statement not found for this account.")
+    return {"status": "success", "statement_id": statement_id}
 
 
 def build_dashboard_result(
