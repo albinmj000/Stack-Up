@@ -1,3 +1,5 @@
+import re
+
 from services.correction_parser import process_correction_message
 from services.ai_assistant import understand_financial_question
 from database.database import get_user_transactions
@@ -80,6 +82,15 @@ def is_budget_planning_question(message):
         for word in ("income", "expense", "spend", "month", "monthly", "regular")
     )
     return asks_for_plan or has_savings_context
+
+
+def requested_transaction_limit(message, default=10):
+    match = re.search(r"\b(\d{1,2})\s+(?:largest|biggest|top)\b", message)
+    if not match:
+        match = re.search(r"\btop\s+(\d{1,2})\b", message)
+    if not match:
+        return default
+    return min(50, max(1, int(match.group(1))))
 
 
 def format_statement_summary(user_id):
@@ -248,6 +259,43 @@ def handle_user_message(user_id, message):
             "type": "query",
             "message": f"You have {count} transactions.",
             "data": {"transaction_count": count},
+        }
+
+    # A ranking request is more specific than broad phrases such as "my
+    # spending". Return the actual largest expense rows instead of a total.
+    ranking_terms = ("largest", "biggest", "top")
+    transaction_terms = (
+        "transaction", "withdrawal", "debit", "payment", "purchase",
+        "spending", "expense",
+    )
+    if (
+        any(term in message_lower for term in ranking_terms)
+        and any(term in message_lower for term in transaction_terms)
+    ):
+        rows = get_user_transactions(user_id)
+        expenses = [
+            row for row in rows
+            if str(row.get("transaction_type") or "").lower() == "expense"
+            and str(row.get("type") or "").lower() == "debit"
+        ]
+        limit = requested_transaction_limit(message_lower)
+        largest = sorted(
+            expenses,
+            key=lambda row: abs(float(row.get("amount") or 0)),
+            reverse=True,
+        )[:limit]
+        total = sum(abs(float(row.get("amount") or 0)) for row in largest)
+        return {
+            "type": "top_transactions",
+            "message": (
+                f"Here are your {len(largest)} largest expense transactions "
+                f"(transfers excluded), totaling INR {total:,.2f}. "
+                "These are the individual transactions contributing most to your spending."
+                if largest
+                else "I couldn't find any debit transactions classified as expenses."
+            ),
+            "transactions": largest,
+            "data": {"count": len(largest), "total": round(total, 2)},
         }
 
     # 3. Highest-spending category
