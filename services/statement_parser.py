@@ -235,6 +235,19 @@ def is_statement_summary_line(line):
 
 
 def extract_transactions_from_text(text):
+    # Remove the statement-summary section from the source before assembling
+    # transaction rows. PDF text extraction may split "TRANSACTION TOTAL"
+    # across lines or merge its numbers into the preceding UPI row; detecting
+    # the label across the full text prevents those totals from being parsed
+    # as transaction amounts even when running-balance data is unavailable.
+    summary_matches = [
+        match
+        for pattern in STATEMENT_SUMMARY_PATTERNS
+        if (match := pattern.search(text)) is not None
+    ]
+    if summary_matches:
+        text = text[:min(summary_matches, key=lambda match: match.start()).start()]
+
     lines = text.splitlines()
     transactions = []
     current = None
