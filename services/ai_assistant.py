@@ -45,14 +45,21 @@ def understand_financial_question(question, transactions):
     ]
     omitted_count = max(0, len(transactions) - len(recent_transactions))
     totals_by_category = {}
+    totals_by_financial_type = {}
     for transaction in transactions:
         category = str(transaction.get("category") or "Other")[:40]
+        financial_type = str(
+            transaction.get("transaction_type") or "unknown"
+        ).lower()
         try:
             amount = abs(float(transaction.get("amount") or 0))
         except (TypeError, ValueError):
             continue
         totals_by_category[category] = round(
             totals_by_category.get(category, 0) + amount, 2
+        )
+        totals_by_financial_type[financial_type] = round(
+            totals_by_financial_type.get(financial_type, 0) + amount, 2
         )
     categories = [
         "Food", "Transport", "Shopping", "Bills & Utilities",
@@ -75,6 +82,10 @@ Use a category from this list when one fits: {json.dumps(categories)}.
 Map category synonyms for every intent (for example commute, taxi, or fuel to Transport;
 groceries or dining to Food; power bill to Bills & Utilities).
 For general, write a concise answer grounded only in the data. Do not invent facts or totals.
+Treat budget and savings planning questions as general questions, even if they mention
+income, expenses, or a category. Do not turn them into a transaction-list request.
+Use the income and expense totals to estimate the statement-period surplus, excluding
+transfers. Do not claim that a statement-period total is monthly unless the period is known.
 Use the all-statement category totals for overall spending questions. Recent transaction
 details are only a sample; do not claim they represent the entire statement. If data is
 insufficient, say so.
@@ -85,6 +96,7 @@ Return only JSON in this format:
 Question: {question}
 Saved transaction count: {len(transactions)}
 Recent transaction details omitted: {omitted_count}
+All-statement totals by financial type (INR): {json.dumps(totals_by_financial_type, ensure_ascii=False, separators=(",", ":"))}
 All-statement totals by category (INR): {json.dumps(totals_by_category, ensure_ascii=False, separators=(",", ":"))}
 Recent transaction sample: {json.dumps(transaction_context, ensure_ascii=False, default=str, separators=(",", ":"))}
 """

@@ -58,6 +58,30 @@ def detect_category(message):
     return None
 
 
+def is_budget_planning_question(message):
+    text = message.lower()
+    asks_for_plan = any(
+        phrase in text
+        for phrase in (
+            "how much can i save",
+            "how much money can i save",
+            "realistically save",
+            "save every month",
+            "save each month",
+            "plan my budget",
+            "budget without",
+            "what changes should i make",
+        )
+    )
+    has_savings_context = any(
+        word in text for word in ("save", "saving", "savings", "budget")
+    ) and any(
+        word in text
+        for word in ("income", "expense", "spend", "month", "monthly", "regular")
+    )
+    return asks_for_plan or has_savings_context
+
+
 def format_statement_summary(user_id):
     totals = get_transaction_totals(user_id)
     spending = get_spending_summary(user_id)
@@ -443,8 +467,12 @@ def handle_user_message(user_id, message):
         word in message_lower
         for word in ("save", "saving", "reduce", "cut", "less", "tip", "budget")
     )
+    budget_planning_question = is_budget_planning_question(message_lower)
 
-    if any(p in message_lower for p in saving_phrases) or (saving_category and saving_action):
+    if not budget_planning_question and (
+        any(p in message_lower for p in saving_phrases)
+        or (saving_category and saving_action)
+    ):
         return {
             "type": "saving_guidance",
             **format_saving_guidance(user_id, saving_category),
@@ -460,8 +488,13 @@ def handle_user_message(user_id, message):
 
     try:
         understood = understand_financial_question(message, transactions)
-        intent = understood.get("intent", "general")
-        requested_category = understood.get("category") or detect_category(message)
+        # A budget question may mention category names such as "income" or
+        # "expenses"; those words must not turn it into a transaction-list intent.
+        intent = "general" if budget_planning_question else understood.get("intent", "general")
+        requested_category = (
+            None if budget_planning_question
+            else understood.get("category") or detect_category(message)
+        )
         if isinstance(requested_category, str):
             requested_category = CATEGORY_ALIASES.get(
                 requested_category.lower(), requested_category
