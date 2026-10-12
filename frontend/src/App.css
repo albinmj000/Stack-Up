@@ -1851,14 +1851,16 @@ line-height: 1.7;
 min-height: 260px;
 }
 
-.metric-filter-grid {
+.metric-filter-grid,
+.transaction-filter-grid {
 display: grid;
 grid-template-columns: repeat(3, minmax(0, 1fr));
 gap: 10px;
 margin: 18px 0 12px;
 }
 
-.metric-filter-grid label {
+.metric-filter-grid label,
+.transaction-filter-grid label {
 display: grid;
 gap: 6px;
 min-width: 0;
@@ -1868,7 +1870,9 @@ font-weight: 600;
 }
 
 .metric-filter-grid select,
-.metric-filter-grid input {
+.metric-filter-grid input,
+.transaction-filter-grid select,
+.transaction-filter-grid input {
 width: 100%;
 min-width: 0;
 height: 38px;
@@ -1882,7 +1886,9 @@ font-size: 11px;
 }
 
 .metric-filter-grid select:focus,
-.metric-filter-grid input:focus {
+.metric-filter-grid input:focus,
+.transaction-filter-grid select:focus,
+.transaction-filter-grid input:focus {
 outline: 2px solid rgba(98, 230, 167, 0.35);
 outline-offset: 1px;
 }
@@ -1903,6 +1909,10 @@ cursor: pointer;
 
 .metric-transactions-table {
 min-width: 680px;
+}
+
+.main-transactions-table {
+min-width: 760px;
 }
 
 .category-detail-layout {
@@ -2455,8 +2465,14 @@ grid-template-columns: minmax(0, 1fr);
 grid-template-columns: minmax(0, 1fr);
 }
 
-.metric-filter-grid {
+.metric-filter-grid,
+.transaction-filter-grid {
 grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.transaction-table-wrap .main-transactions-table,
+.transaction-table-wrap .metric-transactions-table {
+min-width: 680px;
 }
 
 .timeline-day-stats {

@@ -1507,7 +1507,7 @@ function App() {
               </div>
 
               {transactions.length > 0 && (
-                <div className="transaction-filter-grid" aria-label="Filter transactions">
+                <div className="metric-filter-grid transaction-filter-grid" aria-label="Filter transactions">
                   <label>
                     <span>Category</span>
                     <select value={transactionFilters.category} onChange={(event) => setTransactionFilters((current) => ({ ...current, category: event.target.value }))}>
