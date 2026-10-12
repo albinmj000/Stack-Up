@@ -775,14 +775,54 @@ function App() {
     savingsGoals,
     savingsAccountKey
   );
-  const spendingLimit = Math.max(0, totalIncome - plannedSavings);
+  const firstTransaction = transactions[0];
+  const firstBankDirection = String(firstTransaction?.type ?? "").toLowerCase();
+  const firstCategory = firstTransaction ? getAnalyticsCategory(firstTransaction) : "";
+  const firstDirection = firstBankDirection === "credit" || firstCategory === "UPI Received"
+    || String(firstTransaction?.transaction_type ?? "").toLowerCase() === "income"
+    ? "credit"
+    : firstBankDirection === "debit" || firstCategory === "UPI Sent"
+      || String(firstTransaction?.transaction_type ?? "").toLowerCase() === "expense"
+      ? "debit"
+      : "unknown";
+  const firstBalance = Number(firstTransaction?.balance);
+  const firstAmount = getAmount(firstTransaction || {});
+  const openingBalance = firstTransaction
+    && Number.isFinite(firstBalance)
+    && firstDirection !== "unknown"
+    ? firstBalance - (firstDirection === "credit" ? firstAmount : -firstAmount)
+    : null;
+  const totalIncomingToAccount = transactions.reduce((total, transaction) => {
+    const bankDirection = String(transaction.type ?? "").toLowerCase();
+    const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
+    const category = getAnalyticsCategory(transaction);
+    if (bankDirection === "credit") return total + getAmount(transaction);
+    if (bankDirection === "debit") return total;
+    if (transactionType === "income" || category === "UPI Received") {
+      return total + getAmount(transaction);
+    }
+    return total;
+  }, 0);
+  const totalFundsAvailable = Math.max(0, (openingBalance ?? 0) + totalIncomingToAccount);
+  const spendingLimit = Math.max(0, totalFundsAvailable - plannedSavings);
+  const totalOutgoingFromAccount = transactions.reduce((total, transaction) => {
+    const bankDirection = String(transaction.type ?? "").toLowerCase();
+    const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
+    const category = getAnalyticsCategory(transaction);
+    if (bankDirection === "debit") return total + getAmount(transaction);
+    if (bankDirection === "credit") return total;
+    if (transactionType === "expense" || category === "UPI Sent") {
+      return total + getAmount(transaction);
+    }
+    return total;
+  }, 0);
   const limitUsagePercent = spendingLimit > 0
-    ? (totalExpenses / spendingLimit) * 100
-    : totalExpenses > 0 ? 100 : 0;
+    ? (totalOutgoingFromAccount / spendingLimit) * 100
+    : totalOutgoingFromAccount > 0 ? 100 : 0;
   const limitIntensity = limitUsagePercent < 50
     ? "low"
     : limitUsagePercent < 85 ? "medium" : "hard";
-  const remainingSpendingLimit = spendingLimit - totalExpenses;
+  const remainingSpendingLimit = spendingLimit - totalOutgoingFromAccount;
 
   function saveSavingsGoal(event) {
     event.preventDefault();
@@ -791,8 +831,8 @@ function App() {
       setSavingsGoalError("Enter a valid savings amount.");
       return;
     }
-    if (goal > totalIncome) {
-      setSavingsGoalError("Your savings goal cannot be greater than your total income.");
+    if (goal > totalFundsAvailable) {
+      setSavingsGoalError("Your savings goal cannot be greater than the total funds available.");
       return;
     }
     setSavingsGoals((current) => ({ ...current, [savingsAccountKey]: goal }));
@@ -1268,8 +1308,8 @@ function App() {
 
                 <form className="savings-limit-form" onSubmit={saveSavingsGoal}>
                   <label>
-                    <span>Total income</span>
-                    <strong>{hasRealData ? money(totalIncome) : "Upload a statement first"}</strong>
+                    <span>Opening balance + money received</span>
+                    <strong>{hasRealData ? money(totalFundsAvailable) : "Upload a statement first"}</strong>
                   </label>
                   <label className="savings-goal-input">
                     <span>Plan to save</span>
@@ -1278,7 +1318,7 @@ function App() {
                       <input
                         type="number"
                         min="0"
-                        max={totalIncome}
+                        max={totalFundsAvailable}
                         step="1"
                         inputMode="numeric"
                         placeholder="e.g. 10000"
@@ -1302,7 +1342,7 @@ function App() {
                   <div className="savings-limit-results">
                     <div className="savings-limit-stats">
                       <div><span>Spending limit</span><strong>{money(spendingLimit)}</strong></div>
-                      <div><span>Already spent</span><strong>{money(totalExpenses)}</strong></div>
+                      <div><span>Spent or sent</span><strong>{money(totalOutgoingFromAccount)}</strong></div>
                       <div>
                         <span>{remainingSpendingLimit >= 0 ? "Limit remaining" : "Over limit"}</span>
                         <strong>{money(Math.abs(remainingSpendingLimit))}</strong>
@@ -1325,7 +1365,10 @@ function App() {
                         : `${limitIntensity[0].toUpperCase()}${limitIntensity.slice(1)}: ${limitUsagePercent.toFixed(0)}% of your spending limit used.`}
                     </p>
                     <small>
-                      {money(totalIncome)} income − {money(plannedSavings)} planned savings = {money(spendingLimit)} available to spend.
+                      {openingBalance === null
+                        ? "Opening balance could not be determined from this statement. "
+                        : `${money(openingBalance)} opening balance + `}
+                      {money(totalIncomingToAccount)} received (including UPI Received) − {money(plannedSavings)} planned savings = {money(spendingLimit)} available to spend.
                     </small>
                   </div>
                 )}
