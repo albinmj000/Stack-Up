@@ -693,7 +693,7 @@ def list_user_statements(user_id):
             LEFT JOIN transactions t ON t.statement_id = s.id AND t.user_id = s.user_id
             LEFT JOIN bank_accounts a ON a.id = s.bank_account_id AND a.user_id = s.user_id
             WHERE s.user_id = ?
-            GROUP BY s.id
+            GROUP BY s.id, a.name
             HAVING COUNT(t.id) > 0
             ORDER BY s.created_at DESC, s.id DESC
         """, (user_id,)).fetchall()
