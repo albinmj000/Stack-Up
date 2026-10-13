@@ -100,6 +100,22 @@ def _insert_id(connection, sql, parameters):
     return connection.execute(sql, parameters).lastrowid
 
 
+def _is_unique_constraint_violation(error):
+    return isinstance(error, sqlite3.IntegrityError) or getattr(error, "sqlstate", None) == "23505"
+
+
+def _delete_orphan_auth_devices(connection):
+    connection.execute("""
+        DELETE FROM auth_devices
+        WHERE active_user_id IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM auth_device_accounts
+              WHERE auth_device_accounts.device_hash = auth_devices.device_hash
+          )
+    """)
+
+
 def create_users_table():
     with get_connection() as connection:
         connection.execute("""
@@ -136,6 +152,8 @@ def create_auth_tables():
                 create_account INTEGER NOT NULL DEFAULT 0,
                 username TEXT,
                 password_hash TEXT,
+                purpose TEXT NOT NULL DEFAULT 'authentication',
+                user_id TEXT,
                 created_at REAL NOT NULL,
                 expires_at REAL NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -146,9 +164,13 @@ def create_auth_tables():
             row["name"]
             for row in connection.execute("PRAGMA table_info(otp_challenges)").fetchall()
         }
-        for column in ("username", "password_hash"):
+        for column in ("username", "password_hash", "user_id"):
             if column not in columns:
                 connection.execute(f"ALTER TABLE otp_challenges ADD COLUMN {column} TEXT")
+        if "purpose" not in columns:
+            connection.execute(
+                "ALTER TABLE otp_challenges ADD COLUMN purpose TEXT NOT NULL DEFAULT 'authentication'"
+            )
         connection.execute("CREATE INDEX IF NOT EXISTS otp_contact_created ON otp_challenges(contact, created_at)")
         connection.execute("""
             CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -233,7 +255,16 @@ def clear_password_login_failures(username):
         )
 
 
-def create_otp_challenge(contact, channel, code, create_account=False, username=None, password_hash=None):
+def create_otp_challenge(
+    contact,
+    channel,
+    code,
+    create_account=False,
+    username=None,
+    password_hash=None,
+    purpose="authentication",
+    user_id=None,
+):
     salt = secrets.token_hex(16)
     code_hash = hashlib.sha256(f"{salt}:{code}".encode()).hexdigest()
     now = time.time()
@@ -241,11 +272,11 @@ def create_otp_challenge(contact, channel, code, create_account=False, username=
         challenge_id = _insert_id(connection, """
             INSERT INTO otp_challenges
                 (contact, channel, code_hash, salt, create_account, username,
-                 password_hash, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 password_hash, purpose, user_id, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             contact, channel, code_hash, salt, int(create_account),
-            username, password_hash, now, now + 600,
+            username, password_hash, purpose, user_id, now, now + 600,
         ))
         return challenge_id
 
@@ -263,7 +294,7 @@ def verify_otp_challenge(contact, code):
     with get_connection() as connection:
         challenge = connection.execute("""
             SELECT id, code_hash, salt, attempts, create_account,
-                   username, password_hash
+                   username, password_hash, purpose, user_id
             FROM otp_challenges
             WHERE contact = ? AND consumed_at IS NULL AND expires_at > ? AND attempts < 5
             ORDER BY id DESC LIMIT 1
@@ -287,6 +318,8 @@ def verify_otp_challenge(contact, code):
             "create_account": bool(challenge["create_account"]),
             "username": challenge["username"],
             "password_hash": challenge["password_hash"],
+            "purpose": challenge["purpose"],
+            "user_id": challenge["user_id"],
         }
 
 
@@ -307,6 +340,167 @@ def get_account_by_username(username):
             (username,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_account_by_id(user_id):
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT user_id, email, phone, username, password_hash FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_account_username(user_id, username):
+    with get_connection() as connection:
+        account = connection.execute(
+            "SELECT username FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if account is None:
+            return False
+        try:
+            cursor = connection.execute(
+                "UPDATE users SET username = ? WHERE user_id = ?",
+                (username, user_id),
+            )
+        except Exception as error:
+            if _is_unique_constraint_violation(error):
+                raise ValueError("That username is already in use.") from error
+            raise
+        if cursor.rowcount and account["username"]:
+            connection.execute(
+                "DELETE FROM password_login_attempts WHERE username_hash = ?",
+                (_username_digest(account["username"]),),
+            )
+        return cursor.rowcount > 0
+
+
+def update_account_contact(user_id, channel, contact):
+    column = {"email": "email", "phone": "phone"}.get(channel)
+    if column is None:
+        raise ValueError("Unsupported contact method.")
+    with get_connection() as connection:
+        account = connection.execute(
+            f"SELECT {column} FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if account is None:
+            return False
+        try:
+            cursor = connection.execute(
+                f"UPDATE users SET {column} = ? WHERE user_id = ?",
+                (contact, user_id),
+            )
+        except Exception as error:
+            if _is_unique_constraint_violation(error):
+                raise ValueError("That email or phone number is already used by another account.") from error
+            raise
+        if cursor.rowcount and account[column] and account[column] != contact:
+            connection.execute(
+                "DELETE FROM otp_challenges WHERE contact = ?",
+                (account[column],),
+            )
+        return cursor.rowcount > 0
+
+
+def update_account_password(
+    user_id,
+    password_hash,
+    current_session_token=None,
+    current_device_token=None,
+):
+    current_token_hash = (
+        hashlib.sha256(current_session_token.encode()).hexdigest()
+        if current_session_token
+        else None
+    )
+    current_device_hash = (
+        hashlib.sha256(current_device_token.encode()).hexdigest()
+        if current_device_token
+        else None
+    )
+    with get_connection() as connection:
+        cursor = connection.execute(
+            "UPDATE users SET password_hash = ? WHERE user_id = ?",
+            (password_hash, user_id),
+        )
+        if cursor.rowcount:
+            if current_token_hash:
+                connection.execute(
+                    "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?",
+                    (user_id, current_token_hash),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM auth_sessions WHERE user_id = ?",
+                    (user_id,),
+                )
+            if current_device_hash:
+                connection.execute(
+                    "DELETE FROM auth_device_accounts WHERE user_id = ? AND device_hash != ?",
+                    (user_id, current_device_hash),
+                )
+                connection.execute(
+                    "UPDATE auth_devices SET active_user_id = NULL WHERE active_user_id = ? AND device_hash != ?",
+                    (user_id, current_device_hash),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM auth_device_accounts WHERE user_id = ?",
+                    (user_id,),
+                )
+                connection.execute(
+                    "UPDATE auth_devices SET active_user_id = NULL WHERE active_user_id = ?",
+                    (user_id,),
+                )
+            _delete_orphan_auth_devices(connection)
+        return cursor.rowcount > 0
+
+
+def remove_auth_device_account(device_token, user_id):
+    device = get_auth_device(device_token)
+    if not device or device["active_user_id"] == user_id:
+        return False
+    with get_connection() as connection:
+        cursor = connection.execute(
+            "DELETE FROM auth_device_accounts WHERE device_hash = ? AND user_id = ?",
+            (device["device_hash"], user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_user_account(user_id):
+    """Delete all records owned by an account in one database transaction."""
+    with get_connection() as connection:
+        account = connection.execute(
+            "SELECT email, phone, username FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if account is None:
+            return False
+
+        connection.execute("DELETE FROM transactions WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM statements WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM merchant_corrections WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM auth_device_accounts WHERE user_id = ?", (user_id,))
+        connection.execute(
+            "UPDATE auth_devices SET active_user_id = NULL WHERE active_user_id = ?",
+            (user_id,),
+        )
+        _delete_orphan_auth_devices(connection)
+        connection.execute("DELETE FROM otp_challenges WHERE user_id = ?", (user_id,))
+        contacts = [value for value in (account["email"], account["phone"]) if value]
+        for contact in contacts:
+            connection.execute("DELETE FROM otp_challenges WHERE contact = ?", (contact,))
+        if account["username"]:
+            connection.execute(
+                "DELETE FROM password_login_attempts WHERE username_hash = ?",
+                (_username_digest(account["username"]),),
+            )
+        cursor = connection.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        return cursor.rowcount > 0
 
 
 def create_account(contact, channel, username=None, password_hash=None):

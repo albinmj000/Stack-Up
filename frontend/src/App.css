@@ -2966,3 +2966,343 @@ transition-duration: 0.01ms !important;
 animation-duration: 0.01ms !important;
 }
 }
+
+.settings-menu-button {
+display: flex;
+align-items: center;
+gap: 9px;
+width: 100%;
+padding: 9px 8px;
+border: 1px solid #293a2e;
+border-radius: 8px;
+color: #c9d8cd;
+background: #0d1510;
+font-size: 11px;
+text-align: left;
+}
+
+.settings-menu-button:hover {
+border-color: #62e6a7;
+color: #83f2bc;
+}
+
+.account-settings-page {
+max-width: 1120px;
+margin: 0 auto;
+}
+
+.settings-page-heading {
+margin-bottom: 24px;
+}
+
+.settings-grid {
+display: grid;
+grid-template-columns: repeat(2, minmax(0, 1fr));
+align-items: start;
+gap: 14px;
+}
+
+.settings-card {
+min-width: 0;
+padding: 19px;
+border: 1px solid #243128;
+border-radius: 13px;
+background: linear-gradient(145deg, #101712, #0c120e);
+}
+
+.settings-card-heading {
+display: flex;
+align-items: flex-start;
+gap: 11px;
+margin-bottom: 17px;
+}
+
+.settings-icon {
+display: grid;
+flex: 0 0 34px;
+height: 34px;
+place-items: center;
+border: 1px solid #2e4938;
+border-radius: 9px;
+color: #73e9ac;
+background: #142119;
+}
+
+.settings-card-heading h2 {
+margin: 1px 0 5px;
+color: #e8f0e9;
+font-family: “Manrope”, sans-serif;
+font-size: 14px;
+}
+
+.settings-card-heading p,
+.settings-note,
+.settings-danger-warning,
+.settings-remembered-list > p {
+margin: 0;
+color: #87968c;
+font-size: 10px;
+line-height: 1.65;
+}
+
+.settings-form {
+display: grid;
+gap: 11px;
+margin-bottom: 16px;
+}
+
+.settings-form label,
+.settings-contact-input {
+display: grid;
+gap: 6px;
+color: #a6b4aa;
+font-size: 10px;
+}
+
+.settings-form input,
+.settings-contact-input input,
+.settings-verify-row input {
+width: 100%;
+min-width: 0;
+min-height: 38px;
+padding: 0 10px;
+border: 1px solid #293a2e;
+border-radius: 7px;
+color: #e3ece5;
+background: #0b120e;
+font-size: 11px;
+}
+
+.settings-contact-row {
+display: grid;
+grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+align-items: end;
+gap: 8px;
+margin-top: 14px;
+padding-top: 13px;
+border-top: 1px solid #202d24;
+}
+
+.settings-contact-current {
+display: grid;
+gap: 5px;
+min-width: 0;
+padding-bottom: 9px;
+}
+
+.settings-contact-current strong {
+color: #a6b4aa;
+font-size: 10px;
+}
+
+.settings-contact-current span {
+overflow: hidden;
+color: #dbe5dd;
+font-size: 10px;
+text-overflow: ellipsis;
+}
+
+.settings-verify-row {
+display: flex;
+align-items: center;
+gap: 8px;
+grid-column: 1 / -1;
+}
+
+.settings-verify-row input {
+max-width: 180px;
+}
+
+.settings-remembered-list {
+display: grid;
+gap: 8px;
+}
+
+.settings-remembered-item {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 10px;
+padding: 9px 10px;
+border: 1px solid #243128;
+border-radius: 8px;
+color: #dbe5dd;
+background: #0b120e;
+font-size: 11px;
+}
+
+.settings-remembered-item small {
+color: #87968c;
+font-size: 9px;
+}
+
+.settings-theme-options {
+display: flex;
+gap: 9px;
+}
+
+.theme-choice {
+display: flex;
+align-items: center;
+gap: 8px;
+min-width: 100px;
+padding: 10px 12px;
+border: 1px solid #293a2e;
+border-radius: 8px;
+color: #afbeb3;
+background: #0b120e;
+font-size: 11px;
+}
+
+.theme-choice.selected {
+border-color: #62e6a7;
+color: #83f2bc;
+}
+
+.settings-danger-card {
+border-color: #553535;
+}
+
+.settings-danger-card .settings-icon {
+border-color: #553535;
+color: #ffaaaa;
+background: #241717;
+}
+
+.settings-danger-warning {
+margin: -5px 0 12px;
+color: #e59d9d;
+}
+
+.danger-button {
+min-height: 39px;
+padding: 0 12px;
+border: 1px solid #8e4343;
+border-radius: 8px;
+color: #ffdada;
+background: #492626;
+font-size: 10px;
+font-weight: 650;
+}
+
+.danger-button:disabled,
+.settings-card button:disabled {
+opacity: 0.55;
+cursor: not-allowed;
+}
+
+.settings-loading {
+color: #87968c;
+font-size: 12px;
+}
+
+:root[data-theme="light"] {
+color: #203027;
+background: #f3f7f4;
+color-scheme: light;
+}
+
+:root[data-theme="light"] body,
+:root[data-theme="light"] .app-shell,
+:root[data-theme="light"] .main-content {
+color: #203027;
+background: #f3f7f4;
+}
+
+:root[data-theme="light"] .sidebar {
+border-color: #dce7df;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .topbar {
+border-color: #dce7df;
+background: rgba(255, 255, 255, 0.94);
+}
+
+:root[data-theme="light"] .breadcrumb strong,
+:root[data-theme="light"] h1,
+:root[data-theme="light"] .settings-card-heading h2,
+:root[data-theme="light"] .panel-heading h2,
+:root[data-theme="light"] .stat-value,
+:root[data-theme="light"] .transaction-name strong,
+:root[data-theme="light"] .account-chip-name {
+color: #203027;
+}
+
+:root[data-theme="light"] .settings-card,
+:root[data-theme="light"] .stat-card,
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .sidebar-account-dropdown,
+:root[data-theme="light"] .account-dropdown {
+border-color: #dce7df;
+background: #ffffff;
+box-shadow: 0 8px 24px rgba(24, 56, 36, 0.06);
+}
+
+:root[data-theme="light"] .settings-form input,
+:root[data-theme="light"] .settings-contact-input input,
+:root[data-theme="light"] .settings-verify-row input,
+:root[data-theme="light"] .settings-remembered-item,
+:root[data-theme="light"] .theme-choice,
+:root[data-theme="light"] .settings-menu-button,
+:root[data-theme="light"] .account-chip,
+:root[data-theme="light"] .search-box,
+:root[data-theme="light"] .category-editor select,
+:root[data-theme="light"] .dashboard-scope-control select,
+:root[data-theme="light"] .panel-heading select {
+border-color: #d4e0d7;
+color: #24362a;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .settings-contact-current strong,
+:root[data-theme="light"] .settings-form label,
+:root[data-theme="light"] .settings-contact-input,
+:root[data-theme="light"] .settings-card-heading p,
+:root[data-theme="light"] .settings-note,
+:root[data-theme="light"] .settings-remembered-item small,
+:root[data-theme="light"] .page-subtitle,
+:root[data-theme="light"] .stat-heading,
+:root[data-theme="light"] .panel-heading p,
+:root[data-theme="light"] .breadcrumb,
+:root[data-theme="light"] .search-box input {
+color: #65766a;
+}
+
+:root[data-theme="light"] .settings-contact-current span,
+:root[data-theme="light"] .profile-text strong,
+:root[data-theme="light"] .sidebar-account-label {
+color: #34483a;
+}
+
+:root[data-theme="light"] .remembered-account {
+border-color: #dce7df;
+color: #34483a;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .settings-danger-card {
+border-color: #e8c9c9;
+}
+
+:root[data-theme="light"] .settings-danger-warning {
+color: #9d4c4c;
+}
+
+@media (max-width: 760px) {
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-contact-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .settings-contact-current {
+    grid-column: 1 / -1;
+  }
+
+  .settings-contact-row > .secondary-button {
+    grid-column: 1 / -1;
+  }
+}

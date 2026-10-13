@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 
 from database import database
 from database.corrections import get_correction, save_correction
+from services import auth_service
 from services.auth_service import _send_email_otp
 
 
@@ -145,6 +146,116 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(get_correction("user-a", "cafe"), "Entertainment")
         self.assertIsNone(get_correction("user-b", "cafe"))
+
+    def test_password_update_preserves_only_current_session(self):
+        database.create_user("user-a")
+        database.create_auth_session("user-a", "current-session")
+        database.create_auth_session("user-a", "other-session")
+        current_device = database.remember_account_on_device(None, "user-a")
+        other_device = database.remember_account_on_device(None, "user-a")
+
+        self.assertTrue(database.update_account_password(
+            "user-a", "new-password-hash", "current-session", current_device
+        ))
+        self.assertIsNotNone(database.get_session_user("current-session"))
+        self.assertIsNone(database.get_session_user("other-session"))
+        self.assertIsNotNone(database.get_auth_device_user(current_device))
+        self.assertIsNone(database.get_auth_device_user(other_device))
+
+    def test_remembered_account_removal_is_device_scoped_and_cannot_remove_active(self):
+        account_a = database.create_account("a@example.com", "email", "account-a")
+        account_b = database.create_account("b@example.com", "email", "account-b")
+        device_token = database.remember_account_on_device(None, account_a["user_id"])
+        database.remember_account_on_device(device_token, account_b["user_id"])
+        database.switch_auth_device_account(device_token, account_a["user_id"])
+
+        self.assertFalse(database.remove_auth_device_account(device_token, account_a["user_id"]))
+        self.assertTrue(database.remove_auth_device_account(device_token, account_b["user_id"]))
+        self.assertEqual(
+            [item["user_id"] for item in database.list_auth_device_accounts(device_token)],
+            [account_a["user_id"]],
+        )
+
+    def test_profile_updates_keep_username_and_contact_unique(self):
+        account_a = database.create_account("a@example.com", "email", "account-a")
+        account_b = database.create_account("b@example.com", "email", "account-b")
+
+        with self.assertRaisesRegex(ValueError, "username is already in use"):
+            database.update_account_username(account_a["user_id"], "account-b")
+        with self.assertRaisesRegex(ValueError, "email or phone number is already used"):
+            database.update_account_contact(
+                account_a["user_id"], "email", account_b["email"]
+            )
+
+    def test_delete_account_removes_only_owned_financial_and_auth_data(self):
+        account_a = database.create_account("a@example.com", "email", "account-a")
+        account_b = database.create_account("b@example.com", "email", "account-b")
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "Cafe",
+            "amount": 125.0,
+            "type": "debit",
+            "balance": 875.0,
+            "category": "Food",
+            "transaction_type": "expense",
+        }
+        statement_a, _ = database.save_statement_with_transactions(
+            account_a["user_id"], "a" * 64, "a.pdf", [transaction], b"a-pdf",
+        )
+        statement_b, _ = database.save_statement_with_transactions(
+            account_b["user_id"], "b" * 64, "b.pdf", [transaction], b"b-pdf",
+        )
+        save_correction(account_a["user_id"], "cafe", "Food")
+        save_correction(account_b["user_id"], "cafe", "Food")
+        database.create_auth_session(account_a["user_id"], "account-a-session")
+        database.create_auth_session(account_b["user_id"], "account-b-session")
+        device_a = database.remember_account_on_device(None, account_a["user_id"])
+        database.create_otp_challenge(
+            "a@example.com", "email", "123456",
+            purpose="account_deletion", user_id=account_a["user_id"],
+        )
+
+        self.assertTrue(database.delete_user_account(account_a["user_id"]))
+        self.assertIsNone(database.get_account_by_id(account_a["user_id"]))
+        self.assertEqual(database.get_user_transactions(account_a["user_id"]), [])
+        self.assertEqual(database.list_user_statements(account_a["user_id"]), [])
+        self.assertIsNone(get_correction(account_a["user_id"], "cafe"))
+        self.assertIsNone(database.get_session_user("account-a-session"))
+        self.assertIsNone(database.get_auth_device(device_a))
+        self.assertTrue(database.get_user_transactions(account_b["user_id"]))
+        self.assertEqual(database.get_statement(account_b["user_id"], statement_b)["filename"], "b.pdf")
+        self.assertEqual(get_correction(account_b["user_id"], "cafe"), "Food")
+        self.assertIsNotNone(database.get_session_user("account-b-session"))
+        self.assertIsNone(database.get_statement(account_a["user_id"], statement_a))
+
+    def test_contact_change_otp_is_bound_to_authenticated_account_and_purpose(self):
+        account = database.create_account("owner@example.com", "email", "owner")
+        codes = []
+
+        with patch.object(auth_service, "_send_email_otp", side_effect=lambda _, code: codes.append(code)):
+            contact, channel = auth_service.request_contact_change_otp(
+                account["user_id"], "new-owner@example.com"
+            )
+
+        challenge = database.verify_otp_challenge(contact, codes[0])
+        self.assertEqual(channel, "email")
+        self.assertEqual(challenge["purpose"], "contact_change")
+        self.assertEqual(challenge["user_id"], account["user_id"])
+
+    def test_sensitive_action_otp_is_bound_to_its_owner_and_purpose(self):
+        account = database.create_account("owner@example.com", "email", "owner")
+        codes = []
+
+        with patch.object(auth_service, "_send_email_otp", side_effect=lambda _, code: codes.append(code)):
+            channel = auth_service.request_account_verification_otp(
+                account["user_id"], "account_deletion"
+            )
+
+        challenge = database.verify_otp_challenge("owner@example.com", codes[0])
+        self.assertEqual(channel, "email")
+        self.assertEqual(challenge["purpose"], "account_deletion")
+        self.assertEqual(challenge["user_id"], account["user_id"])
 
 
 class PostgreSQLAdapterTests(unittest.TestCase):

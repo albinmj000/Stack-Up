@@ -68,3 +68,17 @@ def find_correction_for_description(user_id, description):
         if merchant.strip().casefold() == counterparty.casefold():
             return {"merchant": merchant, "category": correction["category"]}
     return None
+
+
+def list_user_corrections(user_id):
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT merchant, category, created_at
+            FROM merchant_corrections
+            WHERE user_id = ?
+            ORDER BY LOWER(merchant)
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]

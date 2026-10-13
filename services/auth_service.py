@@ -13,6 +13,7 @@ from email.utils import parseaddr
 from database.database import (
     can_request_otp,
     create_otp_challenge,
+    get_account_by_id,
     get_account_by_contact,
     get_account_by_username,
     invalidate_otp_challenge,
@@ -275,6 +276,65 @@ def request_otp(contact, channel, create_account=False, username=None, password=
     except Exception:
         invalidate_otp_challenge(challenge_id)
         raise
+
+
+def request_contact_change_otp(user_id, contact):
+    contact, channel = normalize_contact(contact)
+    existing_account = get_account_by_contact(contact, channel)
+    if existing_account:
+        if existing_account["user_id"] == user_id:
+            raise ValueError("That contact is already on your account.")
+        raise ValueError("That email or phone number is already used by another account.")
+    if not can_request_otp(contact):
+        raise RuntimeError("Please wait before requesting another code. You can request up to five codes per hour.")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    challenge_id = create_otp_challenge(
+        contact,
+        channel,
+        code,
+        purpose="contact_change",
+        user_id=user_id,
+    )
+    try:
+        if channel == "email":
+            _send_email_otp(contact, code)
+        else:
+            _send_sms_otp(contact, code)
+    except Exception:
+        invalidate_otp_challenge(challenge_id)
+        raise
+    return contact, channel
+
+
+def request_account_verification_otp(user_id, purpose):
+    account = get_account_by_id(user_id)
+    if account is None:
+        raise ValueError("Account not found.")
+    contact = account.get("email") or account.get("phone")
+    if not contact:
+        raise RuntimeError("Add a verified email address or phone number before continuing.")
+    channel = "email" if account.get("email") else "phone"
+    if not can_request_otp(contact):
+        raise RuntimeError("Please wait before requesting another code. You can request up to five codes per hour.")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    challenge_id = create_otp_challenge(
+        contact,
+        channel,
+        code,
+        purpose=purpose,
+        user_id=user_id,
+    )
+    try:
+        if channel == "email":
+            _send_email_otp(contact, code)
+        else:
+            _send_sms_otp(contact, code)
+    except Exception:
+        invalidate_otp_challenge(challenge_id)
+        raise
+    return channel
 
 
 def verify_code(contact, code):

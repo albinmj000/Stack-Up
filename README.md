@@ -62,6 +62,25 @@ Configure the OTP delivery variables needed by your providers:
 
 Email OTPs use Resend's HTTPS API; the backend does not fall back to SMTP. SMS OTPs continue to use Twilio.
 
+### Account settings and data controls
+
+Signed-in users can open **Account settings** from the account menu to update a
+username, change or set a password, and replace an email address or phone
+number after verifying the new contact with the configured OTP provider.
+Password changes require the current password when one is set; OTP-only accounts
+use an account-bound verification code. Password changes sign out other
+sessions and remove the account's remembered sign-in from other devices while
+keeping the current device active.
+
+The remembered-account list covers the current browser/device only; it is not a
+global device inventory. Users can download a JSON export containing account
+details, transactions, category corrections, and original PDFs encoded as
+Base64. Exports are limited to 50 MiB of original PDF data per request. Account
+deletion requires password or OTP reauthentication plus the explicit
+`DELETE MY ACCOUNT` confirmation phrase, and removes the account's stored
+financial and authentication records. Appearance preferences are stored in
+that account's browser storage and are not synchronized across devices.
+
 WhatsApp integration is optional. If used, configure `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, and `WHATSAPP_APP_SECRET`.
 
 The AI Assistant can answer general questions without statement data. For current

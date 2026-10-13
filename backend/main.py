@@ -2,6 +2,7 @@ import os
 import logging
 import traceback
 import json
+import base64
 import hashlib
 import hmac
 import secrets
@@ -12,6 +13,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, UploadFile, File, Request, Query, Body, HTTPException, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -47,6 +49,7 @@ from database.database import (
     delete_user_statement,
     get_account_by_contact,
     get_account_by_username,
+    get_account_by_id,
     add_account_credentials,
     create_account,
     create_auth_session,
@@ -61,16 +64,24 @@ from database.database import (
     clear_password_login_failures,
     get_session_user,
     delete_auth_session,
+    update_account_username,
+    update_account_contact,
+    update_account_password,
+    remove_auth_device_account,
+    delete_user_account,
 )
 from services.transaction_processor import (
     determine_transaction_type,
     extract_counterparty,
     transactions_for_same_counterparty,
 )
-from database.corrections import save_correction
+from database.corrections import save_correction, list_user_corrections
 from services.auth_service import (
+    hash_password,
     normalize_contact,
     normalize_username,
+    request_account_verification_otp,
+    request_contact_change_otp,
     request_otp,
     verify_code,
     verify_password,
@@ -212,6 +223,8 @@ async def auth_verify_otp(request: Request, response: Response, payload: dict = 
     challenge = verify_code(contact, payload.get("code"))
     if challenge is None:
         raise HTTPException(status_code=400, detail="That code is invalid or expired. Request a new one and try again.")
+    if challenge.get("purpose", "authentication") != "authentication":
+        raise HTTPException(status_code=400, detail="That code cannot be used to sign in. Request a new sign-in code.")
 
     account = get_account_by_contact(contact, channel)
     if challenge["create_account"]:
@@ -280,6 +293,228 @@ async def auth_login(request: Request, response: Response, payload: dict = Body(
 async def auth_me(request: Request):
     account = authenticated_account(request)
     return {"email": account.get("email"), "phone": account.get("phone"), "username": account.get("username")}
+
+
+@app.get("/auth/settings")
+async def auth_settings(request: Request):
+    account = authenticated_account(request)
+    device_token = request.cookies.get("stack_up_device")
+    device_account = get_auth_device_user(device_token) if device_token else None
+    if device_account and device_account["user_id"] == account["user_id"]:
+        remembered_accounts = list_auth_device_accounts(device_token)
+    else:
+        remembered_accounts = [{**account, "active": 1}]
+    return {
+        "account": {
+            "email": account.get("email"),
+            "phone": account.get("phone"),
+            "username": account.get("username"),
+        },
+        "has_password": bool(get_account_by_id(account["user_id"]).get("password_hash")),
+        "remembered_accounts": remembered_accounts,
+        "remembered_scope": "This device only",
+    }
+
+
+@app.put("/auth/settings/profile")
+async def update_settings_profile(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    stored_account = get_account_by_id(account["user_id"])
+    try:
+        username = normalize_username(payload.get("username"))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if stored_account.get("password_hash") and not verify_password(
+        payload.get("current_password"), stored_account["password_hash"]
+    ):
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    try:
+        updated = update_account_username(account["user_id"], username)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="That username is already in use.") from error
+    if not updated:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    return {"username": username}
+
+
+@app.post("/auth/settings/contact/request")
+async def request_settings_contact_code(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    try:
+        _, channel = request_contact_change_otp(
+            account["user_id"],
+            payload.get("contact"),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        status_code = 429 if "wait before" in str(error).lower() else 503
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+    except Exception as error:
+        logger.error("Contact verification delivery failed (%s).", type(error).__name__)
+        raise HTTPException(status_code=503, detail="We couldn't deliver a verification code. Check the sign-in settings and try again.") from error
+    return {"status": "sent", "message": f"A verification code was sent to the new {channel}."}
+
+
+@app.post("/auth/settings/contact/verify")
+async def verify_settings_contact_code(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    try:
+        contact, channel = normalize_contact(payload.get("contact"))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    challenge = verify_code(contact, payload.get("code"))
+    if (
+        challenge is None
+        or challenge.get("purpose") != "contact_change"
+        or challenge.get("user_id") != account["user_id"]
+    ):
+        raise HTTPException(status_code=400, detail="That code is invalid or expired. Request a new one and try again.")
+    try:
+        updated = update_account_contact(account["user_id"], channel, contact)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="That email or phone number is already used by another account.") from error
+    if not updated:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    return {"status": "success", "email": contact if channel == "email" else account.get("email"),
+            "phone": contact if channel == "phone" else account.get("phone")}
+
+
+@app.post("/auth/settings/verification-code")
+async def request_settings_verification_code(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    purpose = payload.get("purpose")
+    if purpose not in {"password_change", "account_deletion"}:
+        raise HTTPException(status_code=400, detail="Unsupported verification request.")
+    try:
+        channel = request_account_verification_otp(account["user_id"], purpose)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        status_code = 429 if "wait before" in str(error).lower() else 503
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+    except Exception as error:
+        logger.error("Account verification delivery failed (%s).", type(error).__name__)
+        raise HTTPException(status_code=503, detail="We couldn't deliver a verification code. Check the sign-in settings and try again.") from error
+    return {"status": "sent", "message": f"A verification code was sent to your {channel}."}
+
+
+@app.put("/auth/settings/password")
+async def change_settings_password(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    stored_account = get_account_by_id(account["user_id"])
+    current_hash = stored_account.get("password_hash")
+    if current_hash:
+        if not verify_password(payload.get("current_password"), current_hash):
+            raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    else:
+        contact_value = stored_account.get("email") or stored_account.get("phone")
+        try:
+            contact, _ = normalize_contact(contact_value)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        challenge = verify_code(contact, payload.get("verification_code"))
+        if (
+            challenge is None
+            or challenge.get("purpose") != "password_change"
+            or challenge.get("user_id") != account["user_id"]
+        ):
+            raise HTTPException(status_code=400, detail="Request and verify a code before setting a password.")
+    try:
+        new_hash = hash_password(payload.get("new_password"))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    token = request.cookies.get("stack_up_session")
+    device_token = request.cookies.get("stack_up_device")
+    if not update_account_password(account["user_id"], new_hash, token, device_token):
+        raise HTTPException(status_code=404, detail="Account not found.")
+    return {"status": "success", "message": "Password updated. Other active sign-in sessions were signed out."}
+
+
+@app.post("/auth/settings/remembered-accounts/remove")
+async def remove_settings_remembered_account(request: Request, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    user_id = payload.get("user_id")
+    if not user_id or user_id == account["user_id"]:
+        raise HTTPException(status_code=400, detail="You cannot remove the currently active account.")
+    device_token = request.cookies.get("stack_up_device")
+    if not device_token or not remove_auth_device_account(device_token, user_id):
+        raise HTTPException(status_code=404, detail="That account is not remembered on this device.")
+    return {"status": "success"}
+
+
+@app.get("/auth/settings/export")
+async def export_settings_data(request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    statements = list_user_statements(user_id)
+    exported_statements = []
+    total_pdf_bytes = 0
+    for statement in statements:
+        record = get_statement_pdf(user_id, statement["statement_id"])
+        pdf_data = record.get("pdf_data") if record else None
+        if pdf_data:
+            total_pdf_bytes += len(pdf_data)
+            if total_pdf_bytes > 50 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Your statement files are too large for one export. Download them individually from Statement History.")
+        exported_statements.append({
+            **statement,
+            "pdf_base64": base64.b64encode(pdf_data).decode("ascii") if pdf_data else None,
+        })
+    account_data = get_account_by_id(user_id)
+    export_data = {
+        "account": {
+            "email": account_data.get("email"),
+            "phone": account_data.get("phone"),
+            "username": account_data.get("username"),
+        },
+        "statements": exported_statements,
+        "transactions": get_user_transactions(user_id),
+        "category_corrections": list_user_corrections(user_id),
+    }
+    return JSONResponse(
+        content=jsonable_encoder(export_data),
+        headers={
+            "Content-Disposition": 'attachment; filename="stack-up-account-export.json"',
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.post("/auth/settings/delete-account")
+async def delete_settings_account(request: Request, response: Response, payload: dict = Body(...)):
+    account = authenticated_account(request)
+    stored_account = get_account_by_id(account["user_id"])
+    if payload.get("confirmation") != "DELETE MY ACCOUNT":
+        raise HTTPException(status_code=400, detail="Enter DELETE MY ACCOUNT to confirm.")
+    password_hash = stored_account.get("password_hash")
+    if password_hash:
+        if not verify_password(payload.get("password"), password_hash):
+            raise HTTPException(status_code=401, detail="Password is incorrect.")
+    else:
+        contact = stored_account.get("email") or stored_account.get("phone")
+        try:
+            normalized_contact, _ = normalize_contact(contact)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        challenge = verify_code(normalized_contact, payload.get("verification_code"))
+        if (
+            challenge is None
+            or challenge.get("purpose") != "account_deletion"
+            or challenge.get("user_id") != account["user_id"]
+        ):
+            raise HTTPException(status_code=400, detail="Request and verify a code before deleting your account.")
+    if not delete_user_account(account["user_id"]):
+        raise HTTPException(status_code=404, detail="Account not found.")
+    response.delete_cookie(
+        "stack_up_session", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+    )
+    response.delete_cookie(
+        "stack_up_device", path="/", httponly=True,
+        secure=COOKIE_SECURE, samesite=COOKIE_SAMESITE,
+    )
+    return {"status": "success"}
 
 
 @app.get("/auth/accounts")

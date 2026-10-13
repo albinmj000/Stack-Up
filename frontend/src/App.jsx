@@ -19,9 +19,11 @@ import {
   Download,
   Trash2,
   LogOut,
+  Settings,
 } from "lucide-react";
 import stackUpLogo from "./assets/stackup-logo.svg";
 import { API, readApiResponse } from "./api";
+import AccountSettings from "./AccountSettings";
 import "./App.css";
 
 const CATEGORY_OPTIONS = [
@@ -359,6 +361,7 @@ function AuthScreen({ onAuthenticated, initialNotice = "" }) {
 
 function App() {
   const [activePage, setActivePage] = useState("Dashboard");
+  const [theme, setTheme] = useState("dark");
   const [account, setAccount] = useState(null);
   const [rememberedAccounts, setRememberedAccounts] = useState([]);
   const [authLoading, setAuthLoading] = useState(true);
@@ -472,6 +475,23 @@ function App() {
   }, [savingsAccountKey]);
 
   useEffect(() => {
+    if (!savingsAccountKey) {
+      setTheme("dark");
+      return;
+    }
+    try {
+      const savedTheme = window.localStorage.getItem(`stackup:theme:${savingsAccountKey}`);
+      setTheme(savedTheme === "light" ? "light" : "dark");
+    } catch {
+      setTheme("dark");
+    }
+  }, [savingsAccountKey]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
     try {
       window.localStorage.setItem("stackup:savings-goals", JSON.stringify(savingsGoals));
     } catch {
@@ -525,6 +545,27 @@ function App() {
     setActivePage("Dashboard");
     setNotice(`${result.filename || "Statement"} loaded from history.`);
     setError("");
+  }
+
+  async function selectDashboardStatement(value) {
+    if (value === "all") {
+      setDashboardScope("all");
+      setError("");
+      return;
+    }
+
+    const statementId = Number(value);
+    if (!Number.isInteger(statementId)) {
+      setError("Choose a valid statement.");
+      return;
+    }
+
+    try {
+      await loadSavedStatement(statementId);
+      setDashboardScope(String(statementId));
+    } catch (loadError) {
+      setError(loadError.message);
+    }
   }
 
   async function finishSignIn(nextAccount) {
@@ -1263,6 +1304,18 @@ function App() {
               <span className="online-dot" />
             </summary>
             <div className="sidebar-account-dropdown">
+              <button
+                className="settings-menu-button"
+                type="button"
+                onClick={(event) => {
+                  setActivePage("Account Settings");
+                  setMobileMenu(false);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                <Settings size={15} />
+                <span>Account settings</span>
+              </button>
               <span className="sidebar-account-label">ACCOUNTS ON THIS DEVICE</span>
               <div className="remembered-account-list">
                 {rememberedAccounts.map((savedAccount) => {
@@ -1333,6 +1386,17 @@ function App() {
               <div className="account-dropdown">
                 <span className="account-dropdown-label">Signed in as</span>
                 <strong className="account-dropdown-name">{accountLabel}</strong>
+                <button
+                  className="settings-menu-button"
+                  type="button"
+                  onClick={(event) => {
+                    setActivePage("Account Settings");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <Settings size={15} />
+                  <span>Account settings</span>
+                </button>
                 <button className="account-logout" onClick={signOut}>
                   <LogOut size={16} />
                   <span>Log out</span>
@@ -1355,6 +1419,37 @@ function App() {
               {error}
               <button onClick={() => setError("")} aria-label="Dismiss">×</button>
             </div>
+          )}
+
+          {activePage === "Account Settings" && (
+            <AccountSettings
+              account={account}
+              theme={theme}
+              setTheme={setTheme}
+              onProfileUpdated={setAccount}
+              onDeleted={() => {
+                try {
+                  window.localStorage.removeItem(`stackup:theme:${savingsAccountKey}`);
+                } catch {
+                  // Local appearance data is nonessential to server-side account deletion.
+                }
+                setSavingsGoals((current) => {
+                  const next = { ...current };
+                  delete next[savingsAccountKey];
+                  return next;
+                });
+                setAccount(null);
+                setRememberedAccounts([]);
+                setMessages([]);
+                setQuestion("");
+                setTransactions([]);
+                setStatements([]);
+                setAnalysis(null);
+                setCombinedData(null);
+                setAiStatementIds([]);
+                setActivePage("Dashboard");
+              }}
+            />
           )}
 
           {activePage === "Dashboard" && (
@@ -1385,11 +1480,18 @@ function App() {
                     <label className="dashboard-scope-control">
                       <span>Dashboard view</span>
                       <select
-                        value={dashboardScope}
-                        onChange={(event) => setDashboardScope(event.target.value)}
+                        value={useCombinedScope ? "all" : String(activeStatementId ?? "")}
+                        onChange={(event) => selectDashboardStatement(event.target.value)}
                       >
                         <option value="all">All statements combined</option>
-                        <option value="current">Selected statement only</option>
+                        {statements.map((statement) => (
+                          <option
+                            key={statement.statement_id}
+                            value={String(statement.statement_id)}
+                          >
+                            {statement.filename || `Statement ${statement.statement_id}`}
+                          </option>
+                        ))}
                       </select>
                     </label>
                   )}
