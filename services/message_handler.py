@@ -121,6 +121,7 @@ def transaction_totals(transactions):
                 totals["total_transfer_in"] += amount
             elif direction == "debit":
                 totals["total_transfer_out"] += amount
+                totals["total_expenses"] += amount
         else:
             totals["total_unknown"] += amount
     return {name: round(value, 2) for name, value in totals.items()}

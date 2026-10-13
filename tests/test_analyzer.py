@@ -27,7 +27,7 @@ class AnalyzerTests(unittest.TestCase):
         ])
 
         self.assertEqual(result["total_income"], 1500)
-        self.assertEqual(result["total_expenses"], 1000)
-        self.assertEqual(result["net_cash_flow"], 500)
+        self.assertEqual(result["total_expenses"], 1500)
+        self.assertEqual(result["net_cash_flow"], 0)
         self.assertEqual(result["total_transfer_in"], 0)
         self.assertEqual(result["total_transfer_out"], 500)

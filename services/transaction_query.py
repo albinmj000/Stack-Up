@@ -82,6 +82,7 @@ def get_transaction_totals(user_id):
             elif transaction["type"] == "debit":
 
                 total_transfer_out += amount
+                total_expenses += amount
 
         elif transaction_type == "unknown":
 
@@ -154,6 +155,7 @@ def get_statement_totals(
             elif transaction["type"] == "debit":
 
                 total_transfer_out += amount
+                total_expenses += amount
 
         elif transaction_type == "unknown":
 

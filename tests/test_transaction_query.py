@@ -28,6 +28,7 @@ class TransactionQueryTotalsTests(unittest.TestCase):
         result = transaction_query.get_transaction_totals("user-a")
 
         self.assertEqual(result["total_income"], 1500)
+        self.assertEqual(result["total_expenses"], 500)
         self.assertEqual(result["total_transfer_in"], 0)
         self.assertEqual(result["total_transfer_out"], 500)
 
@@ -38,5 +39,6 @@ class TransactionQueryTotalsTests(unittest.TestCase):
         result = transaction_query.get_statement_totals("user-a", 1)
 
         self.assertEqual(result["total_income"], 1500)
+        self.assertEqual(result["total_expenses"], 500)
         self.assertEqual(result["total_transfer_in"], 0)
         self.assertEqual(result["total_transfer_out"], 500)

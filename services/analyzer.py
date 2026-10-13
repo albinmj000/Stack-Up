@@ -37,6 +37,7 @@ def analyze_transactions(transactions):
                 total_transfer_in += amount
             else:
                 total_transfer_out += amount
+                total_expenses += amount
 
         elif transaction_type == "income":
             total_income += amount

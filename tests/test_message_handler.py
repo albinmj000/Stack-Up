@@ -280,10 +280,11 @@ class MessageHandlerTests(unittest.TestCase):
     def test_total_expenses_question(self, get_transactions):
         get_transactions.return_value = [
             {"amount": 5000, "type": "debit", "transaction_type": "expense"},
+            {"amount": 2500, "type": "debit", "transaction_type": "transfer"},
             {"amount": 20000, "type": "credit", "transaction_type": "income"},
         ]
         result = message_handler.handle_user_message("user-1", "What are my total expenses?")
-        self.assertEqual(result["data"]["total_expenses"], 5000)
+        self.assertEqual(result["data"]["total_expenses"], 7500)
 
     @patch.object(message_handler, "get_user_transactions")
     def test_category_total_question(self, get_transactions):
