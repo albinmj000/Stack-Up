@@ -705,6 +705,59 @@ margin: 0 auto;
 padding: 35px 36px 20px;
 }
 
+.notice-message,
+.error-message {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 14px;
+width: fit-content;
+max-width: 100%;
+margin: 0 auto 20px;
+padding: 10px 12px 10px 15px;
+border: 1px solid;
+border-radius: 11px;
+font-size: 12px;
+font-weight: 600;
+line-height: 1.5;
+box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.notice-message {
+border-color: #245638;
+color: #a7eac0;
+background: linear-gradient(135deg, #13251a, #0e1912);
+}
+
+.error-message {
+border-color: #633838;
+color: #f0b4b4;
+background: linear-gradient(135deg, #291818, #1a1111);
+}
+
+.notice-message button,
+.error-message button {
+display: grid;
+flex: 0 0 26px;
+width: 26px;
+height: 26px;
+place-items: center;
+padding: 0;
+border: 1px solid currentColor;
+border-radius: 7px;
+color: inherit;
+background: rgba(255, 255, 255, 0.04);
+font-size: 17px;
+line-height: 1;
+opacity: 0.8;
+}
+
+.notice-message button:hover,
+.error-message button:hover {
+background: rgba(255, 255, 255, 0.1);
+opacity: 1;
+}
+
 .welcome-row {
 display: flex;
 align-items: center;
@@ -3543,4 +3596,440 @@ font-size: 10px;
 :root[data-theme="light"] .ai-select-all,
 :root[data-theme="light"] .ai-statement-group > strong {
 color: #188c55;
+}
+
+:root[data-theme="light"] .app-layout {
+color: #25372b;
+background: #f3f7f4;
+}
+
+:root[data-theme="light"] .workspace-label,
+:root[data-theme="light"] .demo-note,
+:root[data-theme="light"] .stat-foot,
+:root[data-theme="light"] .chart-y-labels,
+:root[data-theme="light"] .timeline-axis-labels,
+:root[data-theme="light"] .chart-month > span,
+:root[data-theme="light"] .account-dropdown-label,
+:root[data-theme="light"] .profile-text span,
+:root[data-theme="light"] .empty-state,
+:root[data-theme="light"] .empty-category-detail,
+:root[data-theme="light"] .category-summary-top,
+:root[data-theme="light"] .category-count,
+:root[data-theme="light"] .transaction-history-name small,
+:root[data-theme="light"] .statement-history-name small,
+:root[data-theme="light"] .transaction-date,
+:root[data-theme="light"] .chat-welcome p,
+:root[data-theme="light"] .analytics-placeholder p,
+:root[data-theme="light"] .savings-limit-heading p,
+:root[data-theme="light"] .savings-limit-form > label,
+:root[data-theme="light"] .limit-intensity-badge {
+color: #5c7062;
+}
+
+:root[data-theme="light"] .topbar,
+:root[data-theme="light"] .sidebar {
+box-shadow: 0 3px 16px rgba(25, 66, 42, 0.035);
+}
+
+:root[data-theme="light"] .nav-item {
+color: #52675a;
+}
+
+:root[data-theme="light"] .nav-item:hover {
+color: #164d30;
+background: #edf5ef;
+}
+
+:root[data-theme="light"] .nav-item.nav-active {
+color: #117540;
+border-color: #c8e6d2;
+background: linear-gradient(100deg, #e5f5e9, #f4faf5);
+}
+
+:root[data-theme="light"] .nav-active svg,
+:root[data-theme="light"] .upgrade-card > button {
+color: #128044;
+}
+
+:root[data-theme="light"] .upgrade-card {
+border-color: #d6e7da;
+background: linear-gradient(145deg, #f4faf5, #eaf5ed);
+}
+
+:root[data-theme="light"] .upgrade-card > strong,
+:root[data-theme="light"] .profile-text strong,
+:root[data-theme="light"] .account-dropdown-name,
+:root[data-theme="light"] .savings-limit-heading h2,
+:root[data-theme="light"] .savings-limit-form > label > strong,
+:root[data-theme="light"] .panel h2,
+:root[data-theme="light"] .category-transaction-name,
+:root[data-theme="light"] .category-summary-card > strong,
+:root[data-theme="light"] .transaction-name strong,
+:root[data-theme="light"] .statement-history-name strong,
+:root[data-theme="light"] .analytics-placeholder h2,
+:root[data-theme="light"] .chat-welcome h2,
+:root[data-theme="light"] .category-result-details strong,
+:root[data-theme="light"] .saving-suggestion-heading strong,
+:root[data-theme="light"] .suggestion-grid button {
+color: #25372b;
+}
+
+:root[data-theme="light"] .upgrade-card p {
+color: #52675a;
+}
+
+:root[data-theme="light"] .account-chip {
+border-color: #cde3d3;
+color: #25372b;
+background: linear-gradient(135deg, #f2faf4, #e7f4eb);
+}
+
+:root[data-theme="light"] .account-chip:hover,
+:root[data-theme="light"] .account-menu[open] .account-chip {
+border-color: #8bc99f;
+background: #e5f4e9;
+}
+
+:root[data-theme="light"] .account-logout {
+border-color: #edcccc;
+color: #a33333;
+background: #fff5f5;
+}
+
+:root[data-theme="light"] .stat-card {
+border-color: #dce9df;
+background: linear-gradient(145deg, #ffffff, #f7faf8);
+box-shadow: 0 7px 22px rgba(26, 68, 42, 0.045);
+}
+
+:root[data-theme="light"] .balance-card {
+border-color: #c4dfcb;
+background: linear-gradient(145deg, #e9f7ec, #f5faf6);
+}
+
+:root[data-theme="light"] .panel {
+border-color: #dce8df;
+background: linear-gradient(145deg, #ffffff, #f9fbf9);
+box-shadow: 0 6px 18px rgba(26, 68, 42, 0.035);
+}
+
+:root[data-theme="light"] .savings-limit-panel {
+border-color: #d7e6da;
+}
+
+:root[data-theme="light"] .savings-limit-form > label > strong,
+:root[data-theme="light"] .stat-value {
+color: #1c3525;
+}
+
+:root[data-theme="light"] .savings-goal-input > div {
+border-color: #d4e0d7;
+color: #566b5b;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .savings-goal-input input {
+color: #24362a;
+}
+
+:root[data-theme="light"] .chart-gridline,
+:root[data-theme="light"] .timeline-gridline {
+border-color: #dce8df;
+}
+
+:root[data-theme="light"] .chart-y-labels,
+:root[data-theme="light"] .timeline-axis-labels,
+:root[data-theme="light"] .chart-month > span {
+color: #627467;
+}
+
+:root[data-theme="light"] .timeline-day:hover::before,
+:root[data-theme="light"] .timeline-day-selected::before {
+background: rgba(30, 139, 77, 0.08);
+}
+
+:root[data-theme="light"] .timeline-chart-scroll {
+scrollbar-color: #b5d5bf #f0f6f1;
+}
+
+:root[data-theme="light"] .insight-card {
+border-color: #c9e4d0;
+color: #147641;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .spending-track {
+background: #e3ece5;
+}
+
+:root[data-theme="light"] .spending-list button,
+:root[data-theme="light"] .category-summary-card {
+border-color: #dce8df;
+color: #34483a;
+background: linear-gradient(145deg, #ffffff, #f5faf6);
+}
+
+:root[data-theme="light"] .category-summary-top > svg {
+color: #16864a;
+}
+
+:root[data-theme="light"] .statement-history-row {
+border-color: #dce8df;
+color: #34483a;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .statement-history-row:hover {
+border-color: #9acba7;
+background: #f4faf5;
+}
+
+:root[data-theme="light"] .statement-history-name strong {
+color: #263b2d;
+}
+
+:root[data-theme="light"] .statement-history-icon {
+border-color: #cae3d0;
+color: #16864a;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .statement-history-download {
+color: #187845;
+}
+
+:root[data-theme="light"] thead th {
+border-color: #dce8df;
+color: #5c7062;
+}
+
+:root[data-theme="light"] tbody td {
+border-color: #e7eee8;
+color: #405448;
+}
+
+:root[data-theme="light"] tbody tr:hover {
+background: rgba(22, 134, 74, 0.045);
+}
+
+:root[data-theme="light"] .transaction-symbol {
+border-color: #dce8df;
+background: #f1f7f2;
+}
+
+:root[data-theme="light"] .category-pill {
+border-color: #dce8df;
+color: #506456;
+background: #f5f9f6;
+}
+
+:root[data-theme="light"] .category-editor select {
+border-color: #cbdccf;
+color: #33483a;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .placeholder-icon,
+:root[data-theme="light"] .chat-logo {
+border-color: #cde5d3;
+color: #16864a;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .suggestion-grid button {
+border-color: #d8e6dc;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .suggestion-grid button:hover {
+border-color: #a5d3b0;
+background: #edf7ef;
+}
+
+:root[data-theme="light"] .suggestion-grid button svg {
+color: #16864a;
+}
+
+:root[data-theme="light"] .chat-user-message {
+border-color: #b8ddc2;
+color: #174b2c;
+background: #e5f5e9;
+}
+
+:root[data-theme="light"] .chat-assistant-message {
+border-color: #dce8df;
+color: #34483a;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .saving-suggestion-card,
+:root[data-theme="light"] .category-result-row {
+border-color: #d6e6da;
+background: #f6faf7;
+}
+
+:root[data-theme="light"] .saving-suggestion-heading span,
+:root[data-theme="light"] .saving-suggestions-title {
+color: #187845;
+}
+
+:root[data-theme="light"] .saving-suggestion-card small,
+:root[data-theme="light"] .saving-suggestion-card p,
+:root[data-theme="light"] .category-result-details span,
+:root[data-theme="light"] .follow-up-questions > span {
+color: #586e5e;
+}
+
+:root[data-theme="light"] .category-result-details strong {
+color: #293d30;
+}
+
+:root[data-theme="light"] .follow-up-questions button {
+border-color: #cfe2d4;
+color: #28613d;
+background: #f4faf5;
+}
+
+:root[data-theme="light"] .follow-up-questions button:hover:not(:disabled) {
+border-color: #95cba3;
+color: #174b2c;
+}
+
+:root[data-theme="light"] .chat-input-form {
+border-color: #cbded0;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .chat-input-form input {
+color: #25372b;
+}
+
+:root[data-theme="light"] .chat-input-form input::placeholder,
+:root[data-theme="light"] .search-box input::placeholder {
+color: #718477;
+}
+
+:root[data-theme="light"] .ai-statement-picker {
+border-color: #dce8df;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .ai-statement-picker > strong {
+color: #25372b;
+}
+
+:root[data-theme="light"] .ai-statement-options label {
+border-color: #dce8df;
+color: #405448;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .ai-statement-options label small {
+color: #5c7062;
+}
+
+:root[data-theme="light"] .ai-statement-options input,
+:root[data-theme="light"] .ai-select-all input {
+accent-color: #16864a;
+}
+
+:root[data-theme="light"] .limit-intensity-badge.low {
+color: #187845;
+}
+
+:root[data-theme="light"] .limit-intensity-badge.medium {
+color: #865400;
+}
+
+:root[data-theme="light"] .limit-intensity-badge.hard,
+:root[data-theme="light"] .settings-danger-warning {
+color: #a33333;
+}
+
+:root[data-theme="light"] .notice-message {
+border-color: #bfe0c7;
+color: #205a33;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .error-message {
+border-color: #eccaca;
+color: #9e3030;
+background: #fff4f4;
+}
+
+:root[data-theme="light"] .primary-button {
+color: #ffffff;
+background: #18834a;
+}
+
+:root[data-theme="light"] .primary-button:hover {
+background: #126e3d;
+}
+
+:root[data-theme="light"] .secondary-button {
+border-color: #cbded0;
+color: #31513b;
+background: #f7faf8;
+}
+
+:root[data-theme="light"] .secondary-button:hover {
+border-color: #8fc59d;
+color: #17693a;
+}
+
+:root[data-theme="light"] .text-button {
+color: #176e3d;
+}
+
+:root[data-theme="light"] .settings-danger-card {
+border-color: #e8caca;
+background: #fffafa;
+}
+
+:root[data-theme="light"] .settings-danger-card .settings-icon {
+border-color: #edcccc;
+color: #a33333;
+background: #fff1f1;
+}
+
+:root[data-theme="light"] .danger-button {
+border-color: #a84747;
+color: #ffffff;
+background: #a33333;
+}
+
+:root[data-theme="light"] .category-popup-backdrop {
+background: rgba(30, 46, 35, 0.38);
+}
+
+:root[data-theme="light"] .category-popup-open {
+box-shadow: 0 24px 90px rgba(22, 52, 32, 0.24);
+}
+
+:root[data-theme="light"] .metric-filter-grid input,
+:root[data-theme="light"] .metric-filter-grid select,
+:root[data-theme="light"] .transaction-filter-grid input,
+:root[data-theme="light"] .transaction-filter-grid select {
+border-color: #d4e0d7;
+color: #263b2d;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .category-detail-layout,
+:root[data-theme="light"] .analytics-placeholder,
+:root[data-theme="light"] .empty-category-detail {
+color: #54685a;
+}
+
+:root[data-theme="light"] .settings-theme-options .theme-choice.selected {
+border-color: #7fbd90;
+color: #176e3d;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .online-dot,
+:root[data-theme="light"] .live-dot,
+:root[data-theme="light"] .ai-dot {
+background: #18834a;
 }

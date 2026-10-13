@@ -22,6 +22,7 @@ import {
   Settings,
 } from "lucide-react";
 import stackUpLogo from "./assets/stackup-logo.svg";
+import stackUpLightLogo from "./assets/stackup-logo-light.svg";
 import { API, readApiResponse } from "./api";
 import AccountSettings from "./AccountSettings";
 import "./App.css";
@@ -681,7 +682,9 @@ function App() {
       setStatements((current) => current.map((statement) => statement.statement_id === statementId
         ? { ...statement, bank_account_id: bankAccountId, bank_account_name: bankAccount?.name ?? null }
         : statement));
-      setNotice("Statement bank account updated.");
+      setNotice(bankAccount
+        ? `Statement linked to ${bankAccount.name}.`
+        : "Statement moved to Unassigned.");
       setError("");
     } catch (assignError) {
       setError(assignError.message);
@@ -1387,7 +1390,7 @@ function App() {
             setMobileMenu(false);
           }}
         >
-          <img className="brand-image" src={stackUpLogo} alt="Stack Up Personal Finance" />
+          <img className="brand-image" src={theme === "light" ? stackUpLightLogo : stackUpLogo} alt="Stack Up Personal Finance" />
         </a>
 
         <div className="workspace-label">SERVICES</div>
