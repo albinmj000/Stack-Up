@@ -1,5 +1,8 @@
 import re
 import logging
+import unicodedata
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from groq import APIConnectionError, APITimeoutError, RateLimitError
 from services.correction_parser import process_correction_message
@@ -121,6 +124,82 @@ def transaction_totals(transactions):
         else:
             totals["total_unknown"] += amount
     return {name: round(value, 2) for name, value in totals.items()}
+
+
+def _normalized_transaction_date(value):
+    text = str(value or "").strip()
+    for date_format in (
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%d-%m-%y",
+        "%d/%m/%y",
+        "%d %b %Y",
+        "%d %b %y",
+    ):
+        try:
+            return datetime.strptime(text, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return text.casefold() or None
+
+
+def _normalized_transaction_amount(value):
+    try:
+        return Decimal(str(value)).copy_abs().quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _transaction_overlap_keys(transaction):
+    amount = _normalized_transaction_amount(transaction.get("amount"))
+    direction = str(transaction.get("type") or "").strip().casefold()
+    if amount is None or direction not in {"debit", "credit"}:
+        return ()
+
+    keys = []
+    reference = unicodedata.normalize(
+        "NFKC", str(transaction.get("reference") or "")
+    ).casefold()
+    reference = re.sub(r"[^a-z0-9]", "", reference)
+    if reference and reference not in {"na", "none", "null", "0"}:
+        keys.append(("reference", reference, direction, amount))
+
+    transaction_date = _normalized_transaction_date(
+        transaction.get("date") or transaction.get("transaction_date")
+    )
+    description = unicodedata.normalize(
+        "NFKC", str(transaction.get("description") or "")
+    ).casefold()
+    description = re.sub(r"[^\w]+", " ", description, flags=re.UNICODE).strip()
+    if transaction_date and description:
+        keys.append(("details", transaction_date, direction, amount, description))
+    return tuple(keys)
+
+
+def deduplicate_overlapping_statement_transactions(transactions):
+    """Drop matching rows only when they came from different statements."""
+    seen_by_key = {}
+    deduplicated = []
+    for transaction in transactions:
+        statement_id = transaction.get("statement_id")
+        if statement_id is None:
+            deduplicated.append(transaction)
+            continue
+
+        keys = _transaction_overlap_keys(transaction)
+        previous_statements = {
+            prior_statement
+            for key in keys
+            for prior_statement in seen_by_key.get(key, set())
+        }
+        if any(prior_statement != statement_id for prior_statement in previous_statements):
+            continue
+
+        deduplicated.append(transaction)
+        for key in keys:
+            seen_by_key.setdefault(key, set()).add(statement_id)
+    return deduplicated
 
 
 def spending_summary(transactions):
@@ -354,6 +433,10 @@ def handle_user_message(
             for selected_id in selected_statement_ids
             for transaction in get_statement_transactions(user_id, selected_id)
         ]
+        if len(selected_statement_ids) > 1:
+            transactions = deduplicate_overlapping_statement_transactions(
+                transactions
+            )
 
     emi_result = calculate_emi_from_conversation(message, history)
     if emi_result is not None:

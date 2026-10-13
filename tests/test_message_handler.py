@@ -30,6 +30,142 @@ class TransactionTotalTests(unittest.TestCase):
         self.assertEqual(totals["total_transfer_out"], 500)
 
 
+class OverlappingStatementDeduplicationTests(unittest.TestCase):
+    def test_deduplicates_reference_and_normalized_details_across_statements(self):
+        transactions = [
+            {
+                "id": 1,
+                "statement_id": 10,
+                "date": "18-09-2026",
+                "description": "UPI/P2M/Shop/Tea",
+                "reference": "UPI-123456",
+                "amount": 250,
+                "type": "debit",
+            },
+            {
+                "id": 2,
+                "statement_id": 11,
+                "date": "2026-09-18",
+                "description": "UPI P2M Shop Tea",
+                "reference": "upi/123456",
+                "amount": 250.00,
+                "type": "debit",
+            },
+            {
+                "id": 3,
+                "statement_id": 10,
+                "date": "19-09-2026",
+                "description": "Cafe Central",
+                "reference": None,
+                "amount": 80,
+                "type": "debit",
+            },
+            {
+                "id": 4,
+                "statement_id": 11,
+                "date": "19/09/2026",
+                "description": "  CAFE   CENTRAL ",
+                "reference": None,
+                "amount": 80.0,
+                "type": "debit",
+            },
+        ]
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            transactions
+        )
+
+        self.assertEqual([item["id"] for item in result], [1, 3])
+
+    def test_preserves_identical_transactions_within_one_statement(self):
+        transactions = [
+            {
+                "id": 1,
+                "statement_id": 10,
+                "date": "18-09-2026",
+                "description": "Cafe Central",
+                "amount": 80,
+                "type": "debit",
+            },
+            {
+                "id": 2,
+                "statement_id": 10,
+                "date": "18-09-2026",
+                "description": "Cafe Central",
+                "amount": 80,
+                "type": "debit",
+            },
+            {
+                "id": 3,
+                "statement_id": 11,
+                "date": "18-09-2026",
+                "description": "Cafe Central",
+                "amount": 80,
+                "type": "debit",
+            },
+        ]
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            transactions
+        )
+
+        self.assertEqual([item["id"] for item in result], [1, 2])
+
+    def test_selected_statement_combination_uses_deduplicated_rows(self):
+        statement_a = [
+            {
+                "id": 1,
+                "statement_id": 10,
+                "date": "18-09-2026",
+                "description": "Salary",
+                "reference": "NEFT123",
+                "amount": 1000,
+                "type": "credit",
+                "transaction_type": "income",
+            }
+        ]
+        statement_b = [
+            {
+                **statement_a[0],
+                "id": 2,
+                "statement_id": 11,
+            },
+            {
+                "id": 3,
+                "statement_id": 11,
+                "date": "20-09-2026",
+                "description": "Other income",
+                "reference": "NEFT456",
+                "amount": 500,
+                "type": "credit",
+                "transaction_type": "income",
+            },
+        ]
+
+        with (
+            patch.object(message_handler, "get_statement_transactions") as get_rows,
+            patch.object(message_handler, "understand_financial_question") as understand,
+            patch.object(message_handler, "process_correction_message", return_value=None),
+        ):
+            get_rows.side_effect = [statement_a, statement_b]
+            understand.return_value = {
+                "intent": "general",
+                "category": None,
+                "answer": "Combined income summary.",
+            }
+
+            result = message_handler.handle_user_message(
+                "user-a",
+                "How much is my income from both statements?",
+                statement_ids=[10, 11],
+            )
+
+        self.assertEqual(result["type"], "ai_answer")
+        context_transactions = understand.call_args.args[1]
+        self.assertEqual(len(context_transactions), 2)
+        self.assertEqual(sum(row["amount"] for row in context_transactions), 1500)
+
+
 class MessageHandlerTests(unittest.TestCase):
     def setUp(self):
         self.correction_patch = patch.object(
