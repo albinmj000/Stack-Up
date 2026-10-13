@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -157,12 +158,16 @@ class MessageHandlerTests(unittest.TestCase):
 
 
 class FinancialQuestionPromptTests(unittest.TestCase):
+    @staticmethod
+    def response_with_content(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
     @patch.object(ai_assistant, "get_client")
     def test_prompt_uses_compact_recent_rows_and_full_statement_totals(self, get_client):
-        response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(
-                content='{"intent":"general","category":null,"answer":"Your spending is summarized."}'
-            ))]
+        response = self.response_with_content(
+            '{"intent":"general","category":null,"answer":"Your spending is summarized."}'
         )
         create = get_client.return_value.chat.completions.create
         create.return_value = response
@@ -183,11 +188,76 @@ class FinancialQuestionPromptTests(unittest.TestCase):
         result = ai_assistant.understand_financial_question("How can I budget?", transactions)
 
         self.assertEqual(result["intent"], "general")
+        self.assertEqual(create.call_args.kwargs["response_format"], {"type": "json_object"})
         prompt = create.call_args.kwargs["messages"][0]["content"]
         self.assertIn('"expense":10000.0', prompt)
         self.assertIn('"amount_inr":100', prompt)
         self.assertIn("Recent transaction details omitted: 70", prompt)
         self.assertNotIn("x" * 101, prompt)
+
+    @patch.object(ai_assistant, "get_client")
+    def test_financial_answer_preserves_multiline_text(self, get_client):
+        answer = "Your statement shows a surplus.\nTry setting aside a fixed amount after essentials."
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(json.dumps({
+                "intent": "general",
+                "category": None,
+                "answer": answer,
+            }))
+        )
+
+        result = ai_assistant.understand_financial_question(
+            "How can I save?", [{"amount": 100, "type": "debit", "date": "2026-01-01"}]
+        )
+
+        self.assertEqual(result["answer"], answer)
+
+    @patch.object(ai_assistant, "get_client")
+    def test_financial_answer_preserves_quotation_marks(self, get_client):
+        answer = 'Try the "pay yourself first" approach.'
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(json.dumps({
+                "intent": "general",
+                "category": None,
+                "answer": answer,
+            }))
+        )
+
+        result = ai_assistant.understand_financial_question(
+            "How can I save?", [{"amount": 100, "type": "debit", "date": "2026-01-01"}]
+        )
+
+        self.assertEqual(result["answer"], answer)
+
+    @patch.object(message_handler, "get_user_transactions")
+    @patch.object(ai_assistant, "get_client")
+    def test_malformed_ai_json_returns_existing_fallback(self, get_client, get_transactions):
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(
+                '{"intent":"general","category":null,"answer":"First line\nSecond line"}'
+            )
+        )
+        get_transactions.return_value = [
+            {
+                "amount": 100,
+                "type": "debit",
+                "transaction_type": "expense",
+                "category": "Food",
+                "date": "2026-01-01",
+            }
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1",
+            "Based on my income, realistically how much can I save in a month?",
+        )
+
+        self.assertEqual(result["type"], "unknown")
+        self.assertEqual(
+            result["message"],
+            "I couldn't prepare a budget answer just now. Please try again "
+            "later, or ask about a specific total or spending category.",
+        )
 
 
 if __name__ == "__main__":

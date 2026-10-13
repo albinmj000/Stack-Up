@@ -106,6 +106,7 @@ Recent transaction sample: {json.dumps(transaction_context, ensure_ascii=False, 
     response = get_client().chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
         temperature=0,
     )
     result = get_response_text(response)
@@ -115,7 +116,12 @@ Recent transaction sample: {json.dumps(transaction_context, ensure_ascii=False, 
     start, end = result.find("{"), result.rfind("}")
     if start < 0 or end < start:
         raise ValueError("The assistant returned an invalid response.")
-    parsed = json.loads(result[start:end + 1])
+    try:
+        parsed = json.loads(result[start:end + 1])
+    except json.JSONDecodeError as error:
+        raise ValueError("The assistant returned invalid JSON.") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("The assistant returned invalid JSON.")
     if parsed.get("intent") not in {"list_category", "category_total", "summary", "general"}:
         parsed["intent"] = "general"
     if not isinstance(parsed.get("answer"), str):
