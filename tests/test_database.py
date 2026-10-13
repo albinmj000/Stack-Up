@@ -77,6 +77,43 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(saved[0]["description"], "Cafe")
         self.assertEqual(database.get_statement_pdf("user-a", statement_id)["pdf_data"], b"pdf-data")
 
+    def test_bank_accounts_and_statement_assignments_are_user_scoped(self):
+        account_id = database.create_user_bank_account("user-a", "Everyday account")["id"]
+        other_account_id = database.create_user_bank_account("user-b", "Everyday account")["id"]
+        with self.assertRaisesRegex(ValueError, "name already exists"):
+            database.create_user_bank_account("user-a", "everyday ACCOUNT")
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "Cafe",
+            "amount": 125.0,
+            "type": "debit",
+            "balance": 875.0,
+            "category": "Food",
+            "transaction_type": "expense",
+        }
+        statement_id, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "january.pdf", [transaction], b"pdf",
+        )
+
+        self.assertTrue(database.assign_statement_bank_account(
+            "user-a", statement_id, account_id
+        ))
+        with self.assertRaisesRegex(ValueError, "Bank account not found"):
+            database.assign_statement_bank_account(
+                "user-a", statement_id, other_account_id
+            )
+        saved_statement = database.list_user_statements("user-a")[0]
+        self.assertEqual(saved_statement["bank_account_id"], account_id)
+        self.assertEqual(saved_statement["bank_account_name"], "Everyday account")
+        self.assertEqual(
+            database.get_statement_transactions("user-a", statement_id)[0]["bank_account_id"],
+            account_id,
+        )
+        self.assertEqual(database.get_user_transactions("user-a")[0]["bank_account_id"], account_id)
+        self.assertEqual(database.list_user_bank_accounts("user-a")[0]["name"], "Everyday account")
+        self.assertEqual(database.list_user_bank_accounts("user-b")[0]["id"], other_account_id)
+
     def test_bulk_category_update_is_scoped_to_the_user(self):
         transaction = {
             "transaction_number": 1,
@@ -208,6 +245,8 @@ class DatabaseTests(unittest.TestCase):
         )
         save_correction(account_a["user_id"], "cafe", "Food")
         save_correction(account_b["user_id"], "cafe", "Food")
+        database.create_user_bank_account(account_a["user_id"], "Daily account")
+        database.create_user_bank_account(account_b["user_id"], "Daily account")
         database.create_auth_session(account_a["user_id"], "account-a-session")
         database.create_auth_session(account_b["user_id"], "account-b-session")
         device_a = database.remember_account_on_device(None, account_a["user_id"])
@@ -223,7 +262,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(get_correction(account_a["user_id"], "cafe"))
         self.assertIsNone(database.get_session_user("account-a-session"))
         self.assertIsNone(database.get_auth_device(device_a))
+        self.assertEqual(database.list_user_bank_accounts(account_a["user_id"]), [])
         self.assertTrue(database.get_user_transactions(account_b["user_id"]))
+        self.assertEqual(database.list_user_bank_accounts(account_b["user_id"])[0]["name"], "Daily account")
         self.assertEqual(database.get_statement(account_b["user_id"], statement_b)["filename"], "b.pdf")
         self.assertEqual(get_correction(account_b["user_id"], "cafe"), "Food")
         self.assertIsNotNone(database.get_session_user("account-b-session"))

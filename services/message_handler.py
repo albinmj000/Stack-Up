@@ -190,8 +190,9 @@ def deduplicate_overlapping_statement_transactions(transactions):
         keys = _transaction_overlap_keys(transaction)
         duplicate_in_another_statement = False
         for key in keys:
+            scoped_key = (transaction.get("bank_account_id"), key)
             statement_occurrences = occurrences_by_key_and_statement.setdefault(
-                key, {}
+                scoped_key, {}
             )
             occurrence_number = statement_occurrences.get(statement_id, 0) + 1
             statement_occurrences[statement_id] = occurrence_number

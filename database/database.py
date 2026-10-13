@@ -482,6 +482,7 @@ def delete_user_account(user_id):
 
         connection.execute("DELETE FROM transactions WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM statements WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM bank_accounts WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM merchant_corrections WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM auth_device_accounts WHERE user_id = ?", (user_id,))
@@ -685,9 +686,12 @@ def list_user_statements(user_id):
         rows = connection.execute("""
             SELECT s.id AS statement_id, s.filename, s.created_at,
                    (s.pdf_data IS NOT NULL) AS pdf_available,
-                   COUNT(t.id) AS transaction_count
+                   COUNT(t.id) AS transaction_count,
+                   s.bank_account_id,
+                   a.name AS bank_account_name
             FROM statements s
             LEFT JOIN transactions t ON t.statement_id = s.id AND t.user_id = s.user_id
+            LEFT JOIN bank_accounts a ON a.id = s.bank_account_id AND a.user_id = s.user_id
             WHERE s.user_id = ?
             GROUP BY s.id
             HAVING COUNT(t.id) > 0
@@ -752,6 +756,77 @@ def create_statements_table():
         }
         if "pdf_data" not in columns:
             connection.execute("ALTER TABLE statements ADD COLUMN pdf_data BLOB")
+        if "bank_account_id" not in columns:
+            connection.execute("ALTER TABLE statements ADD COLUMN bank_account_id INTEGER")
+
+
+def create_bank_accounts_table():
+    with get_connection() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS bank_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, name)
+            )
+        """)
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_name_unique "
+            "ON bank_accounts(user_id, LOWER(name))"
+        )
+
+
+def list_user_bank_accounts(user_id):
+    with get_connection() as connection:
+        rows = connection.execute("""
+            SELECT id, name, created_at
+            FROM bank_accounts
+            WHERE user_id = ?
+            ORDER BY LOWER(name), id
+        """, (user_id,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_user_bank_account(user_id, name):
+    with get_connection() as connection:
+        try:
+            account_id = _insert_id(
+                connection,
+                "INSERT INTO bank_accounts (user_id, name) VALUES (?, ?)",
+                (user_id, name),
+            )
+        except Exception as error:
+            if _is_unique_constraint_violation(error):
+                raise ValueError("A bank account with this name already exists.") from error
+            raise
+        row = connection.execute(
+            "SELECT id, name, created_at FROM bank_accounts WHERE id = ? AND user_id = ?",
+            (account_id, user_id),
+        ).fetchone()
+    return dict(row)
+
+
+def assign_statement_bank_account(user_id, statement_id, bank_account_id):
+    with get_connection() as connection:
+        statement = connection.execute(
+            "SELECT id FROM statements WHERE id = ? AND user_id = ?",
+            (statement_id, user_id),
+        ).fetchone()
+        if statement is None:
+            return False
+        if bank_account_id is not None:
+            bank_account = connection.execute(
+                "SELECT id FROM bank_accounts WHERE id = ? AND user_id = ?",
+                (bank_account_id, user_id),
+            ).fetchone()
+            if bank_account is None:
+                raise ValueError("Bank account not found for this user.")
+        connection.execute(
+            "UPDATE statements SET bank_account_id = ? WHERE id = ? AND user_id = ?",
+            (bank_account_id, statement_id, user_id),
+        )
+        return True
 
 
 def create_corrections_table():
@@ -996,7 +1071,10 @@ def get_user_transactions(user_id):
         rows = connection.execute("""
             SELECT id, transaction_number, date, description, reference,
                    amount, type, balance, category, transaction_type,
-                   statement_id
+                   statement_id,
+                   (SELECT bank_account_id FROM statements
+                    WHERE statements.id = transactions.statement_id
+                      AND statements.user_id = transactions.user_id) AS bank_account_id
             FROM transactions
             WHERE user_id = ?
             ORDER BY id
@@ -1010,7 +1088,10 @@ def get_statement_transactions(user_id, statement_id):
         rows = connection.execute("""
             SELECT id, transaction_number, date, description, reference,
                    amount, type, balance, category, transaction_type,
-                   statement_id
+                   statement_id,
+                   (SELECT bank_account_id FROM statements
+                    WHERE statements.id = transactions.statement_id
+                      AND statements.user_id = transactions.user_id) AS bank_account_id
             FROM transactions
             WHERE user_id = ? AND statement_id = ?
             ORDER BY id
@@ -1060,6 +1141,7 @@ def initialize_database():
     create_users_table()
     create_auth_tables()
     create_statements_table()
+    create_bank_accounts_table()
     create_transactions_table()
     add_statement_id_to_transactions()
     create_corrections_table()

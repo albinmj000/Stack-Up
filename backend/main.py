@@ -11,7 +11,7 @@ import urllib.request
 import urllib.error
 from urllib.parse import quote
 
-from fastapi import FastAPI, UploadFile, File, Request, Query, Body, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, Form, Request, Query, Body, HTTPException, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +46,9 @@ from database.database import (
     save_statement_pdf,
     get_user_transactions,
     list_user_statements,
+    list_user_bank_accounts,
+    create_user_bank_account,
+    assign_statement_bank_account,
     delete_user_statement,
     get_account_by_contact,
     get_account_by_username,
@@ -468,6 +471,7 @@ async def export_settings_data(request: Request):
             "username": account_data.get("username"),
         },
         "statements": exported_statements,
+        "bank_accounts": list_user_bank_accounts(user_id),
         "transactions": get_user_transactions(user_id),
         "category_corrections": list_user_corrections(user_id),
     }
@@ -828,6 +832,73 @@ async def combined_statements(request: Request):
     }
 
 
+@app.get("/statements/selection")
+async def selected_statements(
+    request: Request,
+    statement_ids: list[int] = Query(default=[]),
+):
+    user_id = authenticated_account(request)["user_id"]
+    selected_ids = list(dict.fromkeys(statement_ids))
+    for statement_id in selected_ids:
+        if get_statement(user_id, statement_id) is None:
+            raise HTTPException(status_code=404, detail="Statement not found for this account.")
+    selected_id_set = set(selected_ids)
+    transactions = [
+        transaction
+        for transaction in get_user_transactions(user_id)
+        if transaction.get("statement_id") in selected_id_set
+    ]
+    transactions = deduplicate_overlapping_statement_transactions(transactions)
+    return {
+        "statement_count": len(selected_ids),
+        "transactions": transactions,
+        "analysis": analyze_transactions(transactions),
+    }
+
+
+@app.get("/bank-accounts")
+async def bank_accounts(request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    return {"bank_accounts": list_user_bank_accounts(user_id)}
+
+
+@app.post("/bank-accounts")
+async def add_bank_account(request: Request, payload: dict = Body(...)):
+    user_id = authenticated_account(request)["user_id"]
+    name = str(payload.get("name") or "").strip()
+    if not name or len(name) > 80:
+        raise HTTPException(status_code=400, detail="Enter a bank account name up to 80 characters.")
+    try:
+        bank_account = create_user_bank_account(user_id, name)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"bank_account": bank_account}
+
+
+@app.patch("/statements/{statement_id}/bank-account")
+async def update_statement_bank_account(
+    statement_id: int,
+    request: Request,
+    payload: dict = Body(...),
+):
+    user_id = authenticated_account(request)["user_id"]
+    raw_account_id = payload.get("bank_account_id")
+    try:
+        bank_account_id = int(raw_account_id) if raw_account_id is not None else None
+        if raw_account_id is not None and bank_account_id <= 0:
+            raise ValueError
+        updated = assign_statement_bank_account(
+            user_id,
+            statement_id,
+            bank_account_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Bank account not found for this user.") from error
+    if not updated:
+        raise HTTPException(status_code=404, detail="Statement not found for this account.")
+    return {"status": "success", "statement_id": statement_id, "bank_account_id": bank_account_id}
+
+
 @app.get("/statements/{statement_id}/pdf")
 async def download_statement_pdf(statement_id: int, request: Request):
     user_id = authenticated_account(request)["user_id"]
@@ -950,6 +1021,7 @@ def process_pdf(file_path, user_id):
 async def upload_statement(
     request: Request,
     file: UploadFile = File(...),
+    bank_account_id: int | None = Form(default=None),
     reprocess: bool = Query(
         False,
         description=(
@@ -959,6 +1031,11 @@ async def upload_statement(
     ),
 ):
     user_id = authenticated_account(request)["user_id"]
+    if bank_account_id is not None and not any(
+        bank_account["id"] == bank_account_id
+        for bank_account in list_user_bank_accounts(user_id)
+    ):
+        raise HTTPException(status_code=404, detail="Bank account not found for this user.")
     if (
         not file.filename
         or not file.filename.lower().endswith(".pdf")
@@ -1025,6 +1102,12 @@ async def upload_statement(
                 )
 
                 if saved_result is not None:
+                    if bank_account_id is not None:
+                        assign_statement_bank_account(
+                            user_id,
+                            statement_id,
+                            bank_account_id,
+                        )
                     with open(file_path, "rb") as uploaded_pdf:
                         save_statement_pdf(
                             user_id,
@@ -1073,6 +1156,9 @@ async def upload_statement(
                     return saved_result
                 raise RuntimeError("The saved statement could not be loaded.")
             success_message = "Bank statement analyzed successfully!"
+
+        if bank_account_id is not None:
+            assign_statement_bank_account(user_id, statement_id, bank_account_id)
 
         result = build_dashboard_result(
             user_id,

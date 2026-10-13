@@ -111,6 +111,30 @@ class OverlappingStatementDeduplicationTests(unittest.TestCase):
 
         self.assertEqual([item["id"] for item in result], [1, 2])
 
+    def test_keeps_matching_transactions_from_different_bank_accounts(self):
+        first = {
+            "id": 1,
+            "statement_id": 10,
+            "bank_account_id": 20,
+            "date": "18-09-2026",
+            "description": "Cafe Central",
+            "reference": "same-reference",
+            "amount": 80,
+            "type": "debit",
+        }
+        second = {
+            **first,
+            "id": 2,
+            "statement_id": 11,
+            "bank_account_id": 21,
+        }
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            [first, second]
+        )
+
+        self.assertEqual([item["id"] for item in result], [1, 2])
+
     def test_preserves_maximum_repeat_count_across_overlapping_statements(self):
         def transaction(transaction_id, statement_id):
             return {

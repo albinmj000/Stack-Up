@@ -371,16 +371,19 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
-  const [transactions, setTransactions] = useState([]);
   const [combinedData, setCombinedData] = useState(null);
   const [combinedLoading, setCombinedLoading] = useState(false);
   const [combinedError, setCombinedError] = useState("");
   const [combinedRefreshKey, setCombinedRefreshKey] = useState(0);
-  const [dashboardScope, setDashboardScope] = useState("all");
+  const [selectedDashboardStatementIds, setSelectedDashboardStatementIds] = useState(null);
+  const [dashboardSelectionData, setDashboardSelectionData] = useState(null);
+  const [dashboardSelectionLoading, setDashboardSelectionLoading] = useState(false);
   const [statements, setStatements] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [bankAccountDraft, setBankAccountDraft] = useState("");
+  const [uploadBankAccountId, setUploadBankAccountId] = useState("");
   const [activeStatementId, setActiveStatementId] = useState(null);
   const [aiStatementIds, setAiStatementIds] = useState([]);
-  const [analysis, setAnalysis] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [metricFilters, setMetricFilters] = useState({
@@ -466,6 +469,52 @@ function App() {
   }, [account, statementIdsKey, statements.length, combinedRefreshKey]);
 
   useEffect(() => {
+    if (selectedDashboardStatementIds === null) {
+      setDashboardSelectionData(null);
+      setDashboardSelectionLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    async function loadDashboardSelection() {
+      if (selectedDashboardStatementIds.length === 0) {
+        setDashboardSelectionData({ transactions: [], analysis: null });
+        return;
+      }
+      setDashboardSelectionData(null);
+      setDashboardSelectionLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams();
+        selectedDashboardStatementIds.forEach((statementId) => {
+          params.append("statement_ids", String(statementId));
+        });
+        const response = await fetch(`${API}/statements/selection?${params}`, {
+          credentials: "include",
+        });
+        const result = await readApiResponse(response);
+        if (!response.ok) throw new Error(result.detail || "Could not calculate the selected statements.");
+        if (!cancelled) {
+          setDashboardSelectionData({
+            transactions: Array.isArray(result.transactions) ? result.transactions : [],
+            analysis: result.analysis ?? null,
+          });
+        }
+      } catch (selectionError) {
+        if (!cancelled) {
+          setDashboardSelectionData(null);
+          setError(selectionError.message);
+        }
+      } finally {
+        if (!cancelled) setDashboardSelectionLoading(false);
+      }
+    }
+    loadDashboardSelection();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDashboardStatementIds, statementIdsKey, combinedRefreshKey]);
+
+  useEffect(() => {
     if (savingsAccountKey) {
       setSavingsGoalDraft(String(savingsGoals[savingsAccountKey] ?? ""));
     } else {
@@ -525,6 +574,18 @@ function App() {
     const result = await readApiResponse(response);
     const nextStatements = Array.isArray(result.statements) ? result.statements : [];
     setStatements(nextStatements);
+    const accountsResponse = await fetch(`${API}/bank-accounts`, { credentials: "include" });
+    const accountsResult = await readApiResponse(accountsResponse);
+    if (!accountsResponse.ok) {
+      throw new Error(accountsResult.detail || "Could not load your bank accounts.");
+    }
+    setBankAccounts(Array.isArray(accountsResult.bank_accounts) ? accountsResult.bank_accounts : []);
+    setUploadBankAccountId((current) => (
+      accountsResult.bank_accounts?.some((item) => String(item.id) === current) ? current : ""
+    ));
+    setSelectedDashboardStatementIds((current) => current === null
+      ? null
+      : current.filter((id) => nextStatements.some((statement) => statement.statement_id === id)));
     setAiStatementIds((current) => {
       const available = new Set(nextStatements.map((statement) => statement.statement_id));
       const stillAvailable = current.filter((id) => available.has(id));
@@ -540,8 +601,6 @@ function App() {
     setActiveStatementId(result.statement_id ?? statementId);
     setAiStatementIds([result.statement_id ?? statementId]);
     setMessages([]);
-    setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
-    setAnalysis(result.analysis ?? null);
     setActivePage("Dashboard");
     setNotice(`${result.filename || "Statement"} loaded from history.`);
     setError("");
@@ -549,7 +608,7 @@ function App() {
 
   async function selectDashboardStatement(value) {
     if (value === "all") {
-      setDashboardScope("all");
+      setSelectedDashboardStatementIds(null);
       setError("");
       return;
     }
@@ -560,16 +619,85 @@ function App() {
       return;
     }
 
+    const target = statements.find((statement) => statement.statement_id === statementId);
+    if (!target) {
+      setError("Choose a valid statement.");
+      return;
+    }
+    const current = selectedDashboardStatementIds
+      ?? statements.map((statement) => statement.statement_id);
+    setSelectedDashboardStatementIds(current.includes(statementId)
+      ? current.filter((id) => id !== statementId)
+      : [...current, statementId]);
+    setError("");
+  }
+
+  function toggleDashboardStatementGroup(groupStatements, checked) {
+    const current = selectedDashboardStatementIds
+      ?? statements.map((statement) => statement.statement_id);
+    const groupIds = groupStatements.map((statement) => statement.statement_id);
+    const nextIds = checked
+      ? [...new Set([...current, ...groupIds])]
+      : current.filter((id) => !groupIds.includes(id));
+    setSelectedDashboardStatementIds(nextIds.length === statements.length ? null : nextIds);
+  }
+
+  async function createBankAccount(event) {
+    event.preventDefault();
+    const name = bankAccountDraft.trim();
+    if (!name) return;
     try {
-      await loadSavedStatement(statementId);
-      setDashboardScope(String(statementId));
-    } catch (loadError) {
-      setError(loadError.message);
+      const response = await fetch(`${API}/bank-accounts`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok) throw new Error(result.detail || "Could not add the bank account.");
+      const created = result.bank_account;
+      setBankAccounts((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setUploadBankAccountId(String(created.id));
+      setBankAccountDraft("");
+      setNotice(`${created.name} added. Assign statements to it from the selector or statement history.`);
+      setError("");
+    } catch (createError) {
+      setError(createError.message);
+    }
+  }
+
+  async function assignStatementToBankAccount(statementId, value) {
+    const bankAccountId = value ? Number(value) : null;
+    try {
+      const response = await fetch(`${API}/statements/${statementId}/bank-account`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bank_account_id: bankAccountId }),
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok) throw new Error(result.detail || "Could not assign this statement.");
+      const bankAccount = bankAccounts.find((item) => item.id === bankAccountId);
+      setStatements((current) => current.map((statement) => statement.statement_id === statementId
+        ? { ...statement, bank_account_id: bankAccountId, bank_account_name: bankAccount?.name ?? null }
+        : statement));
+      setNotice("Statement bank account updated.");
+      setError("");
+    } catch (assignError) {
+      setError(assignError.message);
     }
   }
 
   async function finishSignIn(nextAccount) {
     setAccount(nextAccount);
+    setSelectedDashboardStatementIds(null);
+    setUploadBankAccountId("");
+    setDashboardSelectionData(null);
+    setCombinedData(null);
+    setStatements([]);
+    setBankAccounts([]);
+    setAiStatementIds([]);
+    setActiveStatementId(null);
     setAuthNotice("");
     setAuthLoading(true);
     try {
@@ -581,9 +709,7 @@ function App() {
       const history = await refreshStatementHistory();
       if (history.length > 0) await loadSavedStatement(history[0].statement_id);
       else {
-        setTransactions([]);
         setActiveStatementId(null);
-        setAnalysis(null);
         setActivePage("Dashboard");
       }
     } catch (loadError) {
@@ -599,10 +725,11 @@ function App() {
     } finally {
       setAccount(null);
       setRememberedAccounts([]);
-      setTransactions([]);
       setStatements([]);
+      setBankAccounts([]);
+      setDashboardSelectionData(null);
+      setCombinedData(null);
       setActiveStatementId(null);
-      setAnalysis(null);
       setMessages([]);
       setQuestion("");
       setSelectedCategory(null);
@@ -650,10 +777,11 @@ function App() {
       const result = await readApiResponse(response);
       if (!response.ok) throw new Error(result.detail || "Could not add another account.");
       setAccount(null);
-      setTransactions([]);
       setStatements([]);
+      setBankAccounts([]);
+      setDashboardSelectionData(null);
+      setCombinedData(null);
       setActiveStatementId(null);
-      setAnalysis(null);
       setMessages([]);
       setQuestion("");
       setSelectedCategory(null);
@@ -684,6 +812,11 @@ function App() {
         const historyResult = await readApiResponse(historyResponse);
         const history = Array.isArray(historyResult.statements) ? historyResult.statements : [];
         setStatements(history);
+        const bankAccountsResponse = await fetch(`${API}/bank-accounts`, { credentials: "include" });
+        if (bankAccountsResponse.ok) {
+          const bankAccountsResult = await readApiResponse(bankAccountsResponse);
+          setBankAccounts(Array.isArray(bankAccountsResult.bank_accounts) ? bankAccountsResult.bank_accounts : []);
+        }
         if (history.length > 0) {
           const statementResponse = await fetch(
             `${API}/statements/${history[0].statement_id}`,
@@ -692,8 +825,6 @@ function App() {
           if (statementResponse.ok) {
             const statementResult = await readApiResponse(statementResponse);
             setActiveStatementId(statementResult.statement_id ?? history[0].statement_id);
-            setTransactions(statementResult.transactions ?? []);
-            setAnalysis(statementResult.analysis ?? null);
           }
         }
       } catch (restoreError) {
@@ -738,24 +869,6 @@ function App() {
       if (!response.ok || result.status !== "success") {
         throw new Error(result.message || "Could not update this category.");
       }
-      const updatedIds = new Set(result.updated_transaction_ids ?? [transaction.id]);
-      const updatedTypes = new Map(
-        (result.updated_transaction_types ?? []).map((item) => [
-          item.id,
-          item.transaction_type,
-        ])
-      );
-      setTransactions((previous) => previous.map((item) =>
-        updatedIds.has(item.id)
-          ? {
-              ...item,
-              category,
-              transaction_type: updatedTypes.get(item.id) ??
-                (item.id === transaction.id ? result.transaction_type : item.transaction_type),
-            }
-          : item
-      ));
-      setAnalysis(result.analysis);
       setCombinedRefreshKey((current) => current + 1);
       setNotice(
         result.updated_count > 1
@@ -785,6 +898,7 @@ function App() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      if (uploadBankAccountId) formData.append("bank_account_id", uploadBankAccountId);
 
       const response = await fetch(
         `${API}/upload-statement?reprocess=true`,
@@ -807,6 +921,8 @@ function App() {
           setAiStatementIds([result.statement_id]);
           setMessages([]);
         }
+        setSelectedDashboardStatementIds(null);
+        await refreshStatementHistory();
         setNotice(result.message || "This statement was already uploaded.");
         return;
       }
@@ -815,11 +931,10 @@ function App() {
         throw new Error(result.message || result.error || "Unable to analyze this PDF.");
       }
 
-      setTransactions(Array.isArray(result.transactions) ? result.transactions : []);
       setActiveStatementId(result.statement_id ?? null);
       setAiStatementIds(result.statement_id != null ? [result.statement_id] : []);
+      setSelectedDashboardStatementIds(null);
       setMessages([]);
-      setAnalysis(result.analysis ?? null);
       try {
         await refreshStatementHistory();
       } catch (historyError) {
@@ -924,8 +1039,6 @@ function App() {
           await loadSavedStatement(remaining[0].statement_id);
         } else {
           setActiveStatementId(null);
-          setTransactions([]);
-          setAnalysis(null);
           setMessages([]);
         }
       }
@@ -941,13 +1054,33 @@ function App() {
     askQuestion(question.trim());
   }
 
-  const useCombinedScope = dashboardScope === "all" && statements.length > 1;
+  const dashboardSelectionIds = selectedDashboardStatementIds
+    ?? statements.map((statement) => statement.statement_id);
+  const useCombinedScope = selectedDashboardStatementIds === null && statements.length > 0;
+  const hasMultipleDashboardStatements = dashboardSelectionIds.length > 1;
+  const allDashboardStatementsSelected = statements.length > 0
+    && dashboardSelectionIds.length === statements.length;
+  const dashboardScopeDescription = useCombinedScope
+    ? "all uploaded statements"
+    : `${dashboardSelectionIds.length} selected statement${dashboardSelectionIds.length === 1 ? "" : "s"}`;
+  const statementGroups = [
+    ...bankAccounts.map((bankAccount) => ({
+      id: bankAccount.id,
+      name: bankAccount.name,
+      statements: statements.filter((statement) => statement.bank_account_id === bankAccount.id),
+    })),
+    {
+      id: "unassigned",
+      name: "Unassigned statements",
+      statements: statements.filter((statement) => !statement.bank_account_id),
+    },
+  ].filter((group) => group.statements.length > 0 || group.id !== "unassigned");
   const displayTransactions = useCombinedScope
     ? combinedData?.transactions ?? []
-    : transactions;
+    : dashboardSelectionData?.transactions ?? [];
   const displayAnalysis = useCombinedScope
     ? combinedData?.analysis ?? null
-    : analysis;
+    : dashboardSelectionData?.analysis ?? null;
   const totalIncome = Number(displayAnalysis?.total_income ?? 0);
   const totalExpenses = Number(displayAnalysis?.total_expenses ?? 0);
   const netCashFlow = Number(
@@ -962,7 +1095,7 @@ function App() {
     savingsGoals,
     savingsAccountKey
   );
-  const firstTransaction = transactions[0];
+  const firstTransaction = displayTransactions[0];
   const firstBankDirection = String(firstTransaction?.type ?? "").toLowerCase();
   const firstCategory = firstTransaction ? getAnalyticsCategory(firstTransaction) : "";
   const firstDirection = firstBankDirection === "credit" || firstCategory === "UPI Received"
@@ -979,7 +1112,7 @@ function App() {
     && firstDirection !== "unknown"
     ? firstBalance - (firstDirection === "credit" ? firstAmount : -firstAmount)
     : null;
-  const totalIncomingToAccount = transactions.reduce((total, transaction) => {
+  const totalIncomingToAccount = displayTransactions.reduce((total, transaction) => {
     const bankDirection = String(transaction.type ?? "").toLowerCase();
     const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
     const category = getAnalyticsCategory(transaction);
@@ -992,7 +1125,7 @@ function App() {
   }, 0);
   const totalFundsAvailable = Math.max(0, (openingBalance ?? 0) + totalIncomingToAccount);
   const spendingLimit = Math.max(0, totalFundsAvailable - plannedSavings);
-  const totalOutgoingFromAccount = transactions.reduce((total, transaction) => {
+  const totalOutgoingFromAccount = displayTransactions.reduce((total, transaction) => {
     const bankDirection = String(transaction.type ?? "").toLowerCase();
     const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
     const category = getAnalyticsCategory(transaction);
@@ -1442,9 +1575,9 @@ function App() {
                 setRememberedAccounts([]);
                 setMessages([]);
                 setQuestion("");
-                setTransactions([]);
                 setStatements([]);
-                setAnalysis(null);
+                setBankAccounts([]);
+                setSelectedDashboardStatementIds(null);
                 setCombinedData(null);
                 setAiStatementIds([]);
                 setActivePage("Dashboard");
@@ -1464,10 +1597,10 @@ function App() {
                     {hasRealData
                       ? useCombinedScope
                         ? `Combined view of ${combinedData?.statementCount ?? statements.length} uploaded statements. Overlapping transactions are counted once.`
-                        : "Your uploaded statement analysis."
+                        : `Calculated from ${dashboardScopeDescription}. Overlapping transactions are counted once.`
                       : "Upload a bank statement to see your financial overview."}
                   </p>
-                  {useCombinedScope && (
+                  {hasMultipleDashboardStatements && (
                     <p className="demo-note">
                       Transfers between your own accounts may need category review if
                       the statements do not identify them as transfers.
@@ -1476,21 +1609,86 @@ function App() {
                 </div>
 
                 <div className="welcome-actions">
-                  {statements.length > 1 && (
-                    <label className="dashboard-scope-control">
-                      <span>Dashboard view</span>
-                      <select
-                        value={useCombinedScope ? "all" : String(activeStatementId ?? "")}
-                        onChange={(event) => selectDashboardStatement(event.target.value)}
-                      >
-                        <option value="all">All statements combined</option>
-                        {statements.map((statement) => (
-                          <option
-                            key={statement.statement_id}
-                            value={String(statement.statement_id)}
-                          >
-                            {statement.filename || `Statement ${statement.statement_id}`}
-                          </option>
+                  {(statements.length > 0 || bankAccounts.length > 0) && (
+                    <details className="dashboard-statement-picker">
+                      <summary>
+                        <span>Select statements</span>
+                        <strong>{dashboardSelectionIds.length} of {statements.length} selected</strong>
+                      </summary>
+                      <div className="dashboard-statement-picker-panel">
+                        {statements.length > 0 && (
+                          <label className="statement-select-all">
+                            <input
+                              type="checkbox"
+                              checked={allDashboardStatementsSelected}
+                              onChange={(event) => setSelectedDashboardStatementIds(
+                                event.target.checked ? null : []
+                              )}
+                            />
+                            <strong>Select all statements</strong>
+                          </label>
+                        )}
+                        {statementGroups.map((group) => (
+                          <section className="statement-bank-group" key={group.id}>
+                            <label className="statement-bank-group-heading">
+                              {group.statements.length > 0 && (
+                                <input
+                                  type="checkbox"
+                                  checked={group.statements.every((statement) => dashboardSelectionIds.includes(statement.statement_id))}
+                                  onChange={(event) => toggleDashboardStatementGroup(group.statements, event.target.checked)}
+                                />
+                              )}
+                              <strong>{group.name}</strong>
+                            </label>
+                            {group.statements.length > 0 ? group.statements.map((statement) => (
+                              <div className="dashboard-statement-option" key={statement.statement_id}>
+                                <label>
+                                  <input
+                                    type="checkbox"
+                                    checked={dashboardSelectionIds.includes(statement.statement_id)}
+                                    onChange={() => selectDashboardStatement(String(statement.statement_id))}
+                                  />
+                                  <span>
+                                    <strong>{statement.filename || "Bank statement"}</strong>
+                                    <small>{formatDate(statement.created_at)} · {statement.transaction_count} transactions</small>
+                                  </span>
+                                </label>
+                                <select
+                                  aria-label={`Bank account for ${statement.filename || "statement"}`}
+                                  value={statement.bank_account_id ?? ""}
+                                  onChange={(event) => assignStatementToBankAccount(statement.statement_id, event.target.value)}
+                                >
+                                  <option value="">Unassigned</option>
+                                  {bankAccounts.map((bankAccount) => (
+                                    <option key={bankAccount.id} value={bankAccount.id}>{bankAccount.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )) : <p className="statement-group-empty">No statements assigned yet.</p>}
+                          </section>
+                        ))}
+                        <form className="add-bank-account-form" onSubmit={createBankAccount}>
+                          <input
+                            value={bankAccountDraft}
+                            onChange={(event) => setBankAccountDraft(event.target.value)}
+                            maxLength={80}
+                            placeholder="Add a bank account name"
+                            aria-label="New bank account name"
+                          />
+                          <button className="secondary-button" type="submit" disabled={!bankAccountDraft.trim()}>
+                            Add account
+                          </button>
+                        </form>
+                      </div>
+                    </details>
+                  )}
+                  {bankAccounts.length > 0 && (
+                    <label className="dashboard-scope-control upload-bank-account">
+                      <span>Upload to bank account</span>
+                      <select value={uploadBankAccountId} onChange={(event) => setUploadBankAccountId(event.target.value)}>
+                        <option value="">Unassigned</option>
+                        {bankAccounts.map((bankAccount) => (
+                          <option key={bankAccount.id} value={bankAccount.id}>{bankAccount.name}</option>
                         ))}
                       </select>
                     </label>
@@ -1516,6 +1714,11 @@ function App() {
                   Could not load the combined overview: {combinedError}
                 </div>
               )}
+              {!useCombinedScope && dashboardSelectionLoading && (
+                <div className="notice-message" role="status">
+                  Calculating the selected statements...
+                </div>
+              )}
 
               <section className="stat-grid">
                 <button className="stat-card balance-card metric-card" onClick={() => openMetric("net_cash_flow")}>
@@ -1529,7 +1732,7 @@ function App() {
                   <div className="stat-foot">
                     <span>
                       {hasRealData
-                        ? useCombinedScope ? "Across statements" : "From statement"
+                        ? hasMultipleDashboardStatements ? "Across selected statements" : "From selected statement"
                         : "Upload a statement"}
                     </span>
                   </div>
@@ -1587,13 +1790,13 @@ function App() {
                 </button>
               </section>
 
-              {useCombinedScope ? (
+              {dashboardSelectionIds.length !== 1 ? (
                 <section className="panel savings-limit-panel">
                   <h2>Spending limit</h2>
                   <p>
-                    Choose one statement to set a spending limit. Opening balances
-                    from multiple statements can overlap or belong to different
-                    accounts, so they are not combined here.
+                    Select exactly one statement to set a spending limit. Opening
+                    balances from multiple statements can overlap or belong to
+                    different bank accounts, so they are not combined here.
                   </p>
                 </section>
               ) : (
@@ -1602,7 +1805,7 @@ function App() {
                   <div>
                     <div className="eyebrow"><span className="live-dot" /> SPENDING LIMITER</div>
                     <h2>Set your savings target</h2>
-                    <p>Choose how much of this statement’s income you want to save. Stack Up calculates your spending limit.</p>
+                    <p>Choose how much of this selected statement’s income you want to save. Stack Up calculates your spending limit.</p>
                   </div>
                   <span className={`limit-intensity-badge ${hasSavingsGoal ? limitIntensity : "unset"}`}>
                     {hasSavingsGoal ? `${limitIntensity} intensity` : "Set a target"}
@@ -1848,7 +2051,7 @@ function App() {
                   <div className="eyebrow"><span className="live-dot" /> TRANSACTION TIMELINE</div>
                   <h1>Your money, <span>over time.</span></h1>
                   <p className="page-subtitle">
-                    Daily income and spending across {useCombinedScope ? "all uploaded statements" : "the selected statement"}.
+                    Daily income and spending across {dashboardScopeDescription}.
                   </p>
                 </div>
                 <button className="secondary-button" onClick={() => setActivePage("Dashboard")}>
@@ -1999,7 +2202,7 @@ function App() {
                   <h2>Transactions</h2>
                   <p>
                     {filteredTransactions.length} of {displayTransactions.length} transactions shown
-                    {useCombinedScope ? " across all uploaded statements" : ""}. Changing a UPI category updates matching transactions and is remembered for future payments.
+                    {dashboardSelectionIds.length > 1 ? ` across ${dashboardScopeDescription}` : ""}. Changing a UPI category updates matching transactions and is remembered for future payments.
                   </p>
                 </div>
                 <label className="upload-button">
@@ -2141,7 +2344,10 @@ function App() {
                     <div className="statement-history-row" key={statement.statement_id}>
                       <button
                         className="statement-history-open"
-                        onClick={() => loadSavedStatement(statement.statement_id).catch((loadError) => setError(loadError.message))}
+                        onClick={() => {
+                          setSelectedDashboardStatementIds([statement.statement_id]);
+                          loadSavedStatement(statement.statement_id).catch((loadError) => setError(loadError.message));
+                        }}
                       >
                         <span className="statement-history-icon"><History size={18} /></span>
                         <span className="statement-history-name">
@@ -2150,6 +2356,17 @@ function App() {
                         </span>
                         <ArrowUpRight size={16} />
                       </button>
+                      <select
+                        className="statement-bank-assignment"
+                        aria-label={`Bank account for ${statement.filename || "statement"}`}
+                        value={statement.bank_account_id ?? ""}
+                        onChange={(event) => assignStatementToBankAccount(statement.statement_id, event.target.value)}
+                      >
+                        <option value="">Unassigned</option>
+                        {bankAccounts.map((bankAccount) => (
+                          <option key={bankAccount.id} value={bankAccount.id}>{bankAccount.name}</option>
+                        ))}
+                      </select>
                       {statement.pdf_available && (
                         <a
                           className="statement-history-download"
@@ -2454,27 +2671,46 @@ function App() {
               {statements.length > 0 && (
                 <div className="ai-statement-picker">
                   <strong>Analyze these statements</strong>
-                  <div className="ai-statement-options">
-                    {statements.map((statement) => (
-                      <label key={statement.statement_id}>
-                        <input
-                          type="checkbox"
-                          checked={aiStatementIds.includes(statement.statement_id)}
-                          onChange={(event) => {
-                            setAiStatementIds((current) => event.target.checked
-                              ? [...current, statement.statement_id]
-                              : current.filter((id) => id !== statement.statement_id));
-                            setMessages([]);
-                            setError("");
-                          }}
-                        />
-                        <span>
-                          <strong>{statement.filename || "Bank statement"}</strong>
-                          <small>{formatDate(statement.created_at)} · {statement.transaction_count} transactions</small>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
+                  <label className="ai-select-all">
+                    <input
+                      type="checkbox"
+                      checked={aiStatementIds.length === statements.length}
+                      onChange={(event) => {
+                        setAiStatementIds(event.target.checked
+                          ? statements.map((statement) => statement.statement_id)
+                          : []);
+                        setMessages([]);
+                        setError("");
+                      }}
+                    />
+                    <span>Select all statements</span>
+                  </label>
+                  {statementGroups.map((group) => group.statements.length > 0 && (
+                    <section className="ai-statement-group" key={group.id}>
+                      <strong>{group.name}</strong>
+                      <div className="ai-statement-options">
+                        {group.statements.map((statement) => (
+                          <label key={statement.statement_id}>
+                            <input
+                              type="checkbox"
+                              checked={aiStatementIds.includes(statement.statement_id)}
+                              onChange={(event) => {
+                                setAiStatementIds((current) => event.target.checked
+                                  ? [...current, statement.statement_id]
+                                  : current.filter((id) => id !== statement.statement_id));
+                                setMessages([]);
+                                setError("");
+                              }}
+                            />
+                            <span>
+                              <strong>{statement.filename || "Bank statement"}</strong>
+                              <small>{formatDate(statement.created_at)} · {statement.transaction_count} transactions</small>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               )}
 

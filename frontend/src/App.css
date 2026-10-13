@@ -3306,3 +3306,241 @@ color: #9d4c4c;
     grid-column: 1 / -1;
   }
 }
+
+.dashboard-statement-picker {
+position: relative;
+min-width: 265px;
+}
+
+.dashboard-statement-picker > summary {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 14px;
+min-height: 42px;
+padding: 0 12px;
+border: 1px solid #293b2f;
+border-radius: 9px;
+color: #e8eee9;
+background: #101812;
+font-size: 11px;
+list-style: none;
+cursor: pointer;
+}
+
+.dashboard-statement-picker > summary::-webkit-details-marker {
+display: none;
+}
+
+.dashboard-statement-picker > summary strong {
+color: #78e9a9;
+font-size: 10px;
+}
+
+.dashboard-statement-picker-panel {
+position: absolute;
+top: calc(100% + 8px);
+right: 0;
+z-index: 30;
+width: min(460px, calc(100vw - 32px));
+max-height: min(68vh, 620px);
+overflow-y: auto;
+padding: 12px;
+border: 1px solid #2a4032;
+border-radius: 11px;
+background: #111a14;
+box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.statement-select-all,
+.statement-bank-group-heading {
+display: flex;
+align-items: center;
+gap: 9px;
+min-height: 35px;
+color: #dfe9e1;
+font-size: 11px;
+}
+
+.statement-select-all {
+padding: 0 5px 8px;
+border-bottom: 1px solid #26372c;
+}
+
+.statement-select-all input,
+.statement-bank-group-heading input,
+.dashboard-statement-option input {
+accent-color: #62e6a7;
+}
+
+.statement-bank-group {
+padding: 8px 0;
+border-bottom: 1px solid #26372c;
+}
+
+.statement-bank-group-heading {
+color: #83f2bc;
+}
+
+.dashboard-statement-option {
+display: grid;
+grid-template-columns: minmax(0, 1fr) minmax(110px, 145px);
+align-items: center;
+gap: 9px;
+padding: 5px 0 5px 23px;
+}
+
+.dashboard-statement-option > label {
+display: flex;
+align-items: flex-start;
+gap: 8px;
+min-width: 0;
+color: #d9e4dc;
+font-size: 10px;
+}
+
+.dashboard-statement-option > label > span {
+display: grid;
+gap: 4px;
+min-width: 0;
+}
+
+.dashboard-statement-option > label strong {
+overflow-wrap: anywhere;
+font-weight: 550;
+}
+
+.dashboard-statement-option > label small,
+.statement-group-empty {
+color: #87968c;
+font-size: 9px;
+}
+
+.dashboard-statement-option select,
+.statement-bank-assignment {
+width: 100%;
+min-width: 0;
+padding: 7px 22px 7px 8px;
+border: 1px solid #293b2f;
+border-radius: 7px;
+color: #c9d8cd;
+background: #0b120e;
+font-size: 9px;
+}
+
+.statement-group-empty {
+margin: 0;
+padding: 2px 0 7px 23px;
+}
+
+.add-bank-account-form {
+display: flex;
+gap: 8px;
+padding-top: 11px;
+}
+
+.add-bank-account-form input {
+flex: 1;
+min-width: 0;
+min-height: 38px;
+padding: 0 10px;
+border: 1px solid #293a2e;
+border-radius: 7px;
+color: #e3ece5;
+background: #0b120e;
+font-size: 10px;
+}
+
+.add-bank-account-form .secondary-button {
+white-space: nowrap;
+}
+
+.upload-bank-account select {
+max-width: 160px;
+}
+
+.statement-bank-assignment {
+max-width: 150px;
+}
+
+@media (max-width: 760px) {
+  .dashboard-statement-picker {
+    width: 100%;
+  }
+
+  .dashboard-statement-picker-panel {
+    right: auto;
+    left: 0;
+  }
+
+  .dashboard-statement-option {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: 21px;
+  }
+
+  .dashboard-statement-option select {
+    margin-left: 23px;
+    width: calc(100% - 23px);
+  }
+
+  .upload-bank-account,
+  .upload-bank-account select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .statement-history-row {
+    flex-wrap: wrap;
+  }
+
+  .statement-history-open {
+    flex-basis: 100%;
+  }
+}
+
+:root[data-theme="light"] .dashboard-statement-picker > summary,
+:root[data-theme="light"] .dashboard-statement-picker-panel,
+:root[data-theme="light"] .dashboard-statement-option select,
+:root[data-theme="light"] .statement-bank-assignment,
+:root[data-theme="light"] .add-bank-account-form input {
+border-color: #d4e0d7;
+color: #24362a;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .statement-select-all,
+:root[data-theme="light"] .dashboard-statement-option > label {
+color: #34483a;
+}
+
+:root[data-theme="light"] .statement-bank-group-heading,
+:root[data-theme="light"] .dashboard-statement-picker > summary strong {
+color: #188c55;
+}
+
+.ai-select-all {
+display: flex;
+align-items: center;
+gap: 8px;
+color: #aebbb1;
+font-size: 10px;
+}
+
+.ai-select-all input {
+accent-color: #62e6a7;
+}
+
+.ai-statement-group {
+display: grid;
+gap: 8px;
+}
+
+.ai-statement-group > strong {
+color: #83f2bc;
+font-size: 10px;
+}
+
+:root[data-theme="light"] .ai-select-all,
+:root[data-theme="light"] .ai-statement-group > strong {
+color: #188c55;
+}
