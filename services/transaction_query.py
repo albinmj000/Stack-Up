@@ -63,8 +63,9 @@ def get_transaction_totals(user_id):
             "transaction_type",
             "unknown"
         )
+        category = str(transaction.get("category") or "").strip().casefold()
 
-        if transaction_type == "income":
+        if category == "upi received" or transaction_type == "income":
 
             total_income += amount
 
@@ -134,8 +135,9 @@ def get_statement_totals(
             "transaction_type",
             "unknown"
         )
+        category = str(transaction.get("category") or "").strip().casefold()
 
-        if transaction_type == "income":
+        if category == "upi received" or transaction_type == "income":
 
             total_income += amount
 

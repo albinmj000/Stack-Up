@@ -207,7 +207,10 @@ def rule_based_category(transaction):
 def determine_transaction_type(transaction, category):
     original_type = str(transaction.get("type") or "").lower().strip()
 
-    if category in ("Transfer", "UPI Sent", "UPI Received"):
+    if category == "UPI Received":
+        return "income"
+
+    if category in ("Transfer", "UPI Sent"):
         return "transfer"
 
     if category == "Refund":
@@ -302,7 +305,9 @@ def categorize_transactions(transactions, user_id=None):
                     elif original_type == "credit" and ai_type == "expense":
                         ai_type = "income"
 
-                    if ai_category in ("Transfer", "UPI Sent", "UPI Received"):
+                    if ai_category == "UPI Received":
+                        ai_type = "income"
+                    elif ai_category in ("Transfer", "UPI Sent"):
                         ai_type = "transfer"
                     elif ai_category in ("Income", "Interest Income"):
                         ai_type = "income"

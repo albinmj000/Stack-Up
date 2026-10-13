@@ -1,6 +1,7 @@
 import unittest
 
 from services.transaction_processor import transactions_for_same_counterparty
+from services.transaction_processor import determine_transaction_type
 
 
 class CounterpartyTransactionTests(unittest.TestCase):
@@ -33,4 +34,14 @@ class CounterpartyTransactionTests(unittest.TestCase):
         self.assertEqual(
             transactions_for_same_counterparty(transactions, selected),
             [selected],
+        )
+
+    def test_upi_received_is_income_and_upi_sent_remains_transfer(self):
+        self.assertEqual(
+            determine_transaction_type({"type": "credit"}, "UPI Received"),
+            "income",
+        )
+        self.assertEqual(
+            determine_transaction_type({"type": "debit"}, "UPI Sent"),
+            "transfer",
         )

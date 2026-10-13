@@ -29,7 +29,10 @@ def analyze_transactions(transactions):
             transaction.get("category") or "Other"
         ).strip()
 
-        if category.lower() == "transfer" or transaction_type == "transfer":
+        if category.casefold() == "upi received":
+            total_income += amount
+
+        elif category.lower() == "transfer" or transaction_type == "transfer":
             if direction == "credit":
                 total_transfer_in += amount
             else:

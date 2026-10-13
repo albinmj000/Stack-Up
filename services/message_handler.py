@@ -108,7 +108,8 @@ def transaction_totals(transactions):
             transaction.get("transaction_type") or "unknown"
         ).lower()
         direction = str(transaction.get("type") or "").lower()
-        if transaction_type == "income":
+        category = str(transaction.get("category") or "").strip().casefold()
+        if category == "upi received" or transaction_type == "income":
             totals["total_income"] += amount
         elif transaction_type == "expense":
             totals["total_expenses"] += amount

@@ -562,6 +562,10 @@ async def change_transaction_category(
         "transaction_type": determine_transaction_type(transaction, category),
         "updated_count": updated_count,
         "updated_transaction_ids": [item[0] for item in transaction_updates],
+        "updated_transaction_types": [
+            {"id": item[0], "transaction_type": item[2]}
+            for item in transaction_updates
+        ],
         "counterparty": counterparty,
         "analysis": analyze_transactions(statement_transactions),
     }

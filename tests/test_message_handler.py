@@ -8,6 +8,28 @@ from unittest.mock import patch
 from services import ai_assistant, message_handler
 
 
+class TransactionTotalTests(unittest.TestCase):
+    def test_upi_received_is_income_in_assistant_totals(self):
+        totals = message_handler.transaction_totals([
+            {
+                "amount": 1500,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "transfer",
+            },
+            {
+                "amount": 500,
+                "type": "debit",
+                "category": "UPI Sent",
+                "transaction_type": "transfer",
+            },
+        ])
+
+        self.assertEqual(totals["total_income"], 1500)
+        self.assertEqual(totals["total_transfer_in"], 0)
+        self.assertEqual(totals["total_transfer_out"], 500)
+
+
 class MessageHandlerTests(unittest.TestCase):
     def setUp(self):
         self.correction_patch = patch.object(

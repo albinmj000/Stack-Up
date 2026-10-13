@@ -162,6 +162,8 @@ def understand_financial_question(question, transactions=None, history=None):
         financial_type = str(
             transaction.get("transaction_type") or "unknown"
         ).lower()
+        if category.casefold() == "upi received":
+            financial_type = "income"
         try:
             amount = abs(float(transaction.get("amount") or 0))
         except (TypeError, ValueError):
@@ -603,7 +605,7 @@ Important rules:
 1. Return exactly ONE result for every transaction.
 2. Keep the transaction ID exactly the same.
 3. For bank debits: The user spent money. Unless clearly an explicit transfer to own account, classify transaction_type as "expense".
-4. For bank credits: The user received money. Unless an explicit self-transfer, classify transaction_type as "income" (category "Income", or "Interest Income", or "Refund").
+4. For bank credits: The user received money. Unless an explicit self-transfer, classify transaction_type as "income" (category "Income", "Interest Income", "Refund", or "UPI Received").
 5. Determine the most accurate category from merchant or counterparty names:
    - Hotel / Restaurant / Cafe / Bakery / Mess / Canteen / Food / Eatery / Swiggy / Zomato -> Food
    - Uber / Ola / Rapido / Petrol / Fuel / Redbus / IRCTC / Transport / Cab -> Transport
@@ -612,7 +614,7 @@ Important rules:
    - Hospital / Clinic / Medical / Pharmacy / Health -> Healthcare
    - Slice / Pocketly / Cred / EMI / Loan -> Loan / Credit
    - Netflix / Spotify / Cinema / Movie / Google Play -> Entertainment
-   - Person-to-person UPI debit -> UPI Sent; person-to-person UPI credit -> UPI Received
+   - Person-to-person UPI debit -> UPI Sent and transaction_type "transfer"; person-to-person UPI credit -> UPI Received and transaction_type "income", unless clearly an explicit self-transfer
    - Self ATM withdrawal -> Cash Withdrawal
    - Bank charge / GST / SMS charges -> Bank Charges
 6. If the specific merchant or counterparty is not recognized, use category "Other", but KEEP transaction_type as "expense" for debits and "income" for credits.

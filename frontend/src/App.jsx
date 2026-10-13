@@ -97,6 +97,9 @@ function getTransactionType(transaction) {
 }
 
 function getTransactionFilterType(transaction) {
+  if (getAnalyticsCategory(transaction) === "UPI Received") {
+    return "income";
+  }
   const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
   if (["income", "expense", "transfer", "unknown"].includes(transactionType)) {
     return transactionType;
@@ -643,18 +646,19 @@ function App() {
         throw new Error(result.message || "Could not update this category.");
       }
       const updatedIds = new Set(result.updated_transaction_ids ?? [transaction.id]);
+      const updatedTypes = new Map(
+        (result.updated_transaction_types ?? []).map((item) => [
+          item.id,
+          item.transaction_type,
+        ])
+      );
       setTransactions((previous) => previous.map((item) =>
         updatedIds.has(item.id)
           ? {
               ...item,
               category,
-              transaction_type: item.id === transaction.id
-                ? result.transaction_type
-                : String(item.type || "").toLowerCase() === "credit"
-                  ? (category === "Transfer" ? "transfer" : "income")
-                  : String(item.type || "").toLowerCase() === "debit"
-                    ? (category === "Transfer" ? "transfer" : "expense")
-                    : "unknown",
+              transaction_type: updatedTypes.get(item.id) ??
+                (item.id === transaction.id ? result.transaction_type : item.transaction_type),
             }
           : item
       ));
@@ -1047,7 +1051,9 @@ function App() {
     : [];
 
   const incomeTransactions = transactions.filter(
-    (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "income"
+    (transaction) =>
+      getAnalyticsCategory(transaction) === "UPI Received" ||
+      String(transaction.transaction_type ?? "").toLowerCase() === "income"
   );
   const expenseTransactions = transactions.filter(
     (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "expense"
