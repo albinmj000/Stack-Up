@@ -18,6 +18,19 @@ def get_upi_activity(transaction):
     return None
 
 
+def get_expense_amount(transaction):
+    shared_share = transaction.get("shared_bill_owner_share")
+    if shared_share is not None:
+        try:
+            return abs(float(shared_share))
+        except (TypeError, ValueError):
+            pass
+    try:
+        return abs(float(transaction.get("amount") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def analyze_transactions(transactions):
     total_income = 0.0
     total_expenses = 0.0
@@ -51,6 +64,8 @@ def analyze_transactions(transactions):
         upi_activity = get_upi_activity(transaction)
         if upi_activity == "received":
             total_upi_received += amount
+            if transaction.get("income_included") in (True, 1):
+                total_income += amount
         elif upi_activity == "sent":
             total_upi_sent += amount
         elif category.lower() == "transfer" or transaction_type == "transfer":
@@ -64,10 +79,11 @@ def analyze_transactions(transactions):
             total_income += amount
 
         elif transaction_type == "expense":
-            total_expenses += amount
+            expense_amount = get_expense_amount(transaction)
+            total_expenses += expense_amount
 
             # Only actual expenses contribute to spending categories.
-            category_totals[category] += amount
+            category_totals[category] += expense_amount
             transaction_counts[category] += 1
 
         else:

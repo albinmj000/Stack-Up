@@ -18,6 +18,8 @@ import {
   History,
   Download,
   Trash2,
+  Users,
+  Plus,
   LogOut,
   Settings,
 } from "lucide-react";
@@ -91,6 +93,12 @@ function getAmount(transaction) {
   return Math.abs(Number(value) || 0);
 }
 
+function getCountedExpenseAmount(transaction) {
+  return transaction.shared_bill_owner_share == null
+    ? getAmount(transaction)
+    : Math.abs(Number(transaction.shared_bill_owner_share) || 0);
+}
+
 function getTransactionType(transaction) {
   const text = `${transaction.type ?? ""} ${transaction.transaction_type ?? ""} ${transaction.category ?? ""}`.toLowerCase();
   if (text.includes("income") || text.includes("credit") || text.includes("deposit")) {
@@ -100,6 +108,7 @@ function getTransactionType(transaction) {
 }
 
 function getTransactionFilterType(transaction) {
+  if (transaction.income_included) return "income";
   if (getAnalyticsCategory(transaction) === "UPI Received") {
     return "income";
   }
@@ -380,6 +389,16 @@ function App() {
   const [combinedLoading, setCombinedLoading] = useState(false);
   const [combinedError, setCombinedError] = useState("");
   const [combinedRefreshKey, setCombinedRefreshKey] = useState(0);
+  const [sharedBillRefreshKey, setSharedBillRefreshKey] = useState(0);
+  const [sharedBills, setSharedBills] = useState([]);
+  const [sharedBillFormOpen, setSharedBillFormOpen] = useState(false);
+  const [sharedBillTransactionId, setSharedBillTransactionId] = useState("");
+  const [sharedBillTitle, setSharedBillTitle] = useState("");
+  const [sharedBillOwnerShare, setSharedBillOwnerShare] = useState("");
+  const [sharedBillParticipants, setSharedBillParticipants] = useState([
+    { name: "", share_amount: "" },
+  ]);
+  const [sharedBillBusy, setSharedBillBusy] = useState(false);
   const [selectedDashboardStatementIds, setSelectedDashboardStatementIds] = useState(null);
   const [dashboardSelectionData, setDashboardSelectionData] = useState(null);
   const [dashboardSelectionLoading, setDashboardSelectionLoading] = useState(false);
@@ -391,6 +410,7 @@ function App() {
   const [aiStatementIds, setAiStatementIds] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
+  const [incomeInclusionBusyId, setIncomeInclusionBusyId] = useState(null);
   const [metricFilters, setMetricFilters] = useState({
     category: "all",
     type: "all",
@@ -472,6 +492,44 @@ function App() {
       cancelled = true;
     };
   }, [account, statementIdsKey, statements.length, combinedRefreshKey]);
+
+  useEffect(() => {
+    setSharedBills([]);
+    setSharedBillFormOpen(false);
+    setSharedBillTransactionId("");
+    setSharedBillTitle("");
+    setSharedBillOwnerShare("");
+    setSharedBillParticipants([{ name: "", share_amount: "" }]);
+  }, [savingsAccountKey]);
+
+  useEffect(() => {
+    if (!account) {
+      setSharedBills([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    async function loadSharedBills() {
+      try {
+        const response = await fetch(`${API}/shared-bills`, {
+          credentials: "include",
+        });
+        const result = await readApiResponse(response);
+        if (!response.ok) {
+          throw new Error(result.detail || "Could not load shared bills.");
+        }
+        if (!cancelled) {
+          setSharedBills(Array.isArray(result.shared_bills) ? result.shared_bills : []);
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(loadError.message);
+      }
+    }
+    loadSharedBills();
+    return () => {
+      cancelled = true;
+    };
+  }, [account, sharedBillRefreshKey]);
 
   useEffect(() => {
     if (selectedDashboardStatementIds === null) {
@@ -887,6 +945,137 @@ function App() {
     }
   }
 
+  async function toggleIncomeInclusion(transaction, included) {
+    setIncomeInclusionBusyId(transaction.id);
+    setError("");
+    try {
+      const response = await fetch(
+        `${API}/transactions/${transaction.id}/income-inclusion`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ included }),
+        }
+      );
+      const result = await readApiResponse(response);
+      if (!response.ok || result.status !== "success") {
+        throw new Error(result.detail || "Could not update this income choice.");
+      }
+      setCombinedRefreshKey((current) => current + 1);
+      setNotice(
+        included
+          ? "UPI credit added to income."
+          : "UPI credit removed from income."
+      );
+    } catch (incomeError) {
+      setError(incomeError.message);
+    } finally {
+      setIncomeInclusionBusyId(null);
+    }
+  }
+
+  function splitSharedBillEvenly() {
+    const transaction = shareableTransactions.find(
+      (item) => String(item.id) === sharedBillTransactionId
+    );
+    if (!transaction || !sharedBillParticipants.length) return;
+    const totalCents = Math.round(getAmount(transaction) * 100);
+    const otherShareCents = Math.floor(
+      totalCents / (sharedBillParticipants.length + 1)
+    );
+    const ownerShareCents = totalCents - (
+      otherShareCents * sharedBillParticipants.length
+    );
+    setSharedBillOwnerShare((ownerShareCents / 100).toFixed(2));
+    setSharedBillParticipants((current) => current.map((participant) => ({
+      ...participant,
+      share_amount: (otherShareCents / 100).toFixed(2),
+    })));
+  }
+
+  async function createSharedBill(event) {
+    event.preventDefault();
+    setSharedBillBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/shared-bills`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transaction_id: Number(sharedBillTransactionId),
+          title: sharedBillTitle,
+          owner_share: Number(sharedBillOwnerShare),
+          participants: sharedBillParticipants.map((participant) => ({
+            name: participant.name,
+            share_amount: Number(participant.share_amount),
+          })),
+        }),
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(result.detail || "Could not save this shared bill.");
+      }
+      setSharedBills(result.shared_bills ?? []);
+      setSharedBillRefreshKey((current) => current + 1);
+      setCombinedRefreshKey((current) => current + 1);
+      setSharedBillFormOpen(false);
+      setSharedBillTransactionId("");
+      setSharedBillTitle("");
+      setSharedBillOwnerShare("");
+      setSharedBillParticipants([{ name: "", share_amount: "" }]);
+      setNotice("Shared bill saved. Your expenses now use your share.");
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSharedBillBusy(false);
+    }
+  }
+
+  async function setSharedBillRepaid(billId, participantId, isPaid) {
+    try {
+      const response = await fetch(
+        `${API}/shared-bills/${billId}/participants/${participantId}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_paid: isPaid }),
+        }
+      );
+      const result = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(result.detail || "Could not update repayment status.");
+      }
+      setSharedBills(result.shared_bills ?? []);
+      setNotice(isPaid ? "Repayment marked as received." : "Repayment marked as outstanding.");
+    } catch (repaymentError) {
+      setError(repaymentError.message);
+    }
+  }
+
+  async function deleteSharedBill(bill) {
+    if (!window.confirm(`Remove shared-bill tracking for "${bill.title}"? The transaction remains in your statement.`)) {
+      return;
+    }
+    try {
+      const response = await fetch(`${API}/shared-bills/${bill.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(result.detail || "Could not remove shared-bill tracking.");
+      }
+      setSharedBills(result.shared_bills ?? []);
+      setCombinedRefreshKey((current) => current + 1);
+      setNotice("Shared-bill tracking removed. The full transaction is counted as an expense again.");
+    } catch (deleteError) {
+      setError(deleteError.message);
+    }
+  }
+
   async function uploadStatement(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -1085,6 +1274,25 @@ function App() {
   const displayTransactions = useCombinedScope
     ? combinedData?.transactions ?? []
     : dashboardSelectionData?.transactions ?? [];
+  const sharedBillTransactionIds = new Set(
+    sharedBills.map((bill) => Number(bill.transaction_id))
+  );
+  const shareableTransactions = displayTransactions.filter((transaction) =>
+    String(transaction.type ?? "").toLowerCase() === "debit" &&
+    String(transaction.transaction_type ?? "").toLowerCase() === "expense" &&
+    !isUpiActivity(transaction, "received") &&
+    !isUpiActivity(transaction, "sent") &&
+    transaction.shared_bill_id == null &&
+    !sharedBillTransactionIds.has(Number(transaction.id))
+  );
+  const selectedSharedBillTransaction = shareableTransactions.find(
+    (transaction) => String(transaction.id) === sharedBillTransactionId
+  );
+  const visibleSharedBills = sharedBills.filter((bill) =>
+    displayTransactions.some(
+      (transaction) => Number(transaction.id) === Number(bill.transaction_id)
+    )
+  );
   const displayAnalysis = useCombinedScope
     ? combinedData?.analysis ?? null
     : dashboardSelectionData?.analysis ?? null;
@@ -1281,7 +1489,10 @@ function App() {
   const categoryOverview = displayTransactions.reduce((categories, transaction) => {
     const label = getAnalyticsCategory(transaction);
     const category = categories.get(label) ?? { label, amount: 0, count: 0 };
-    category.amount += getAmount(transaction);
+    const isExpense = String(transaction.transaction_type ?? "").toLowerCase() === "expense";
+    category.amount += isExpense
+      ? getCountedExpenseAmount(transaction)
+      : getAmount(transaction);
     category.count += 1;
     categories.set(label, category);
     return categories;
@@ -1305,10 +1516,23 @@ function App() {
 
   const incomeTransactions = displayTransactions.filter(
     (transaction) =>
-      !isUpiActivity(transaction, "received") &&
       !isUpiActivity(transaction, "sent") &&
-      String(getAnalyticsCategory(transaction)).trim().toLowerCase() !== "transfer" &&
-      String(transaction.transaction_type ?? "").toLowerCase() === "income"
+      (
+        (
+          isUpiActivity(transaction, "received") &&
+          transaction.income_included
+        ) ||
+        (
+          !isUpiActivity(transaction, "received") &&
+          String(getAnalyticsCategory(transaction)).trim().toLowerCase() !== "transfer" &&
+          String(transaction.transaction_type ?? "").toLowerCase() === "income"
+        )
+      )
+  );
+  const upiReceivedTransactions = displayTransactions.filter(
+    (transaction) =>
+      isUpiActivity(transaction, "received") &&
+      String(transaction.type ?? "").toLowerCase() === "credit"
   );
   const expenseTransactions = displayTransactions.filter(
     (transaction) =>
@@ -1335,7 +1559,9 @@ function App() {
   const filteredMetricTransactions = selectedMetricTransactions.filter((transaction) => {
     const category = getAnalyticsCategory(transaction);
     const type = String(
-      transaction.transaction_type || getTransactionType(transaction)
+      transaction.income_included
+        ? "income"
+        : transaction.transaction_type || getTransactionType(transaction)
     ).toLowerCase();
     const date = getTransactionDateKey(transaction.date ?? transaction.transaction_date);
     const amount = getAmount(transaction);
@@ -1362,8 +1588,8 @@ function App() {
     total_income: {
       title: "Total income",
       value: money(totalIncome),
-      formula: `Sum of ${incomeTransactions.length} transactions marked as income = ${money(totalIncome)}`,
-      explanation: "Only transactions classified as income are included. UPI activity is tracked separately.",
+      formula: `Sum of ${incomeTransactions.length} income transactions, including any UPI credits you selected = ${money(totalIncome)}`,
+      explanation: "UPI Received credits are separate by default. Use the checkboxes below to include selected credits in income.",
     },
     total_expenses: {
       title: "Total expenses",
@@ -1772,7 +1998,7 @@ function App() {
                     {hasRealData ? money(totalIncome) : "—"}
                   </div>
                   <div className="stat-foot">
-                    <span>{hasRealData ? "Income credits (UPI separate)" : "Awaiting data"}</span>
+                    <span>{hasRealData ? "Income credits + selected UPI" : "Awaiting data"}</span>
                   </div>
                   <div className="mini-bars income-bars">
                     <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
@@ -1815,7 +2041,7 @@ function App() {
               <section className="panel upi-activity-panel">
                 <div className="upi-activity-heading">
                   <h2>UPI activity</h2>
-                  <p>Tracked separately and excluded from income and expenses.</p>
+                  <p>UPI totals stay separate; selected received credits can also count as income.</p>
                 </div>
                 <div className="upi-activity-grid">
                   <article>
@@ -1924,6 +2150,244 @@ function App() {
                 )}
               </section>
               )}
+
+              <section className="panel shared-bills-panel">
+                <div className="panel-heading">
+                  <div>
+                    <div className="eyebrow"><span className="live-dot" /> SHARED EXPENSES</div>
+                    <h2>Shared bills</h2>
+                    <p>Your expense uses your share; the full bank payment and repayments stay visible.</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => setSharedBillFormOpen((open) => !open)}
+                    disabled={!shareableTransactions.length && !sharedBillFormOpen}
+                  >
+                    <Plus size={15} /> {sharedBillFormOpen ? "Close" : "Add shared bill"}
+                  </button>
+                </div>
+
+                {sharedBillFormOpen && (
+                  <form className="shared-bill-form" onSubmit={createSharedBill}>
+                    {shareableTransactions.length > 0 ? (
+                      <>
+                        <label>
+                          <span>Expense transaction</span>
+                          <select
+                            value={sharedBillTransactionId}
+                            onChange={(event) => {
+                              const nextId = event.target.value;
+                              setSharedBillTransactionId(nextId);
+                              const nextTransaction = shareableTransactions.find(
+                                (item) => String(item.id) === nextId
+                              );
+                              if (nextTransaction && !sharedBillTitle.trim()) {
+                                setSharedBillTitle(getTransactionCategory(nextTransaction));
+                              }
+                              setSharedBillOwnerShare("");
+                              setSharedBillParticipants((current) => current.map((person) => ({
+                                ...person,
+                                share_amount: "",
+                              })));
+                            }}
+                            required
+                          >
+                            <option value="">Choose a debit transaction</option>
+                            {shareableTransactions.map((transaction) => (
+                              <option key={transaction.id} value={transaction.id}>
+                                {formatDate(transaction.date)} · {getTransactionName(transaction)} · {money(getAmount(transaction))}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Bill details</span>
+                          <input
+                            value={sharedBillTitle}
+                            onChange={(event) => setSharedBillTitle(event.target.value)}
+                            maxLength={120}
+                            placeholder="e.g. September rent"
+                            required
+                          />
+                        </label>
+                        <div className="shared-bill-form-heading">
+                          <div>
+                            <strong>Split this payment</strong>
+                            <small>
+                              {selectedSharedBillTransaction
+                                ? `Bank payment: ${money(getAmount(selectedSharedBillTransaction))}`
+                                : "Select the expense to see its bank payment."}
+                            </small>
+                          </div>
+                          <button
+                            className="text-button"
+                            type="button"
+                            onClick={splitSharedBillEvenly}
+                            disabled={!selectedSharedBillTransaction}
+                          >
+                            Split equally
+                          </button>
+                        </div>
+                        <div className="shared-bill-share-fields">
+                          <label>
+                            <span>Your share</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              inputMode="decimal"
+                              value={sharedBillOwnerShare}
+                              onChange={(event) => setSharedBillOwnerShare(event.target.value)}
+                              placeholder="0.00"
+                              required
+                            />
+                          </label>
+                          {sharedBillParticipants.map((participant, index) => (
+                            <div className="shared-bill-person-fields" key={`person-${index}`}>
+                              <label>
+                                <span>Person {index + 1}</span>
+                                <input
+                                  value={participant.name}
+                                  onChange={(event) => setSharedBillParticipants((current) =>
+                                    current.map((person, personIndex) => personIndex === index
+                                      ? { ...person, name: event.target.value }
+                                      : person)
+                                  )}
+                                  maxLength={80}
+                                  placeholder="Name"
+                                  required
+                                />
+                              </label>
+                              <label>
+                                <span>Their share</span>
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  inputMode="decimal"
+                                  value={participant.share_amount}
+                                  onChange={(event) => setSharedBillParticipants((current) =>
+                                    current.map((person, personIndex) => personIndex === index
+                                      ? { ...person, share_amount: event.target.value }
+                                      : person)
+                                  )}
+                                  placeholder="0.00"
+                                  required
+                                />
+                              </label>
+                              {sharedBillParticipants.length > 1 && (
+                                <button
+                                  className="shared-bill-remove-person"
+                                  type="button"
+                                  onClick={() => setSharedBillParticipants((current) =>
+                                    current.filter((_, personIndex) => personIndex !== index)
+                                  )}
+                                  aria-label={`Remove person ${index + 1}`}
+                                  title="Remove person"
+                                >
+                                  <X size={15} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="shared-bill-form-footer">
+                          <button
+                            className="text-button"
+                            type="button"
+                            onClick={() => setSharedBillParticipants((current) => [
+                              ...current,
+                              { name: "", share_amount: "" },
+                            ])}
+                            disabled={sharedBillParticipants.length >= 19}
+                          >
+                            <Plus size={14} /> Add another person
+                          </button>
+                          <button
+                            className="primary-button"
+                            type="submit"
+                            disabled={sharedBillBusy || !selectedSharedBillTransaction}
+                          >
+                            {sharedBillBusy ? "Saving..." : "Save shared bill"}
+                          </button>
+                        </div>
+                        <small className="shared-bill-form-note">
+                          Everyone’s shares, including yours, must add up to the full bank payment. You can split equally or enter custom amounts.
+                        </small>
+                      </>
+                    ) : (
+                      <p className="shared-bill-empty">
+                        No available debit expenses in the currently selected statements. Select an expense transaction first; UPI and already-shared transactions aren’t eligible.
+                      </p>
+                    )}
+                  </form>
+                )}
+
+                {visibleSharedBills.length > 0 ? (
+                  <div className="shared-bill-list">
+                    {visibleSharedBills.map((bill) => (
+                      <article className="shared-bill-card" key={bill.id}>
+                        <div className="shared-bill-card-heading">
+                          <div>
+                            <strong>{bill.title}</strong>
+                            <small>{formatDate(bill.date)} · {getTransactionName(bill)}</small>
+                          </div>
+                          <button
+                            className="shared-bill-delete"
+                            type="button"
+                            onClick={() => deleteSharedBill(bill)}
+                            aria-label={`Remove shared bill ${bill.title}`}
+                            title="Remove shared-bill tracking"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                        <div className="shared-bill-summary">
+                          <div><span>Paid from your account</span><strong>{money(bill.gross_amount)}</strong></div>
+                          <div><span>Your share / counted expense</span><strong>{money(bill.owner_share)}</strong></div>
+                          <div><span>Received from others</span><strong>{money(bill.repaid_amount)}</strong></div>
+                          <div><span>Still owed to you</span><strong>{money(bill.amount_owed)}</strong></div>
+                        </div>
+                        <div className="shared-bill-participants">
+                          <div className="shared-bill-participant owner-share">
+                            <span><Users size={14} /> You</span>
+                            <strong>{money(bill.owner_share)}</strong>
+                          </div>
+                          {bill.participants.map((participant) => (
+                            <label className="shared-bill-participant" key={participant.id}>
+                              <span>
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(participant.is_paid)}
+                                  onChange={(event) => setSharedBillRepaid(
+                                    bill.id,
+                                    participant.id,
+                                    event.target.checked
+                                  )}
+                                />
+                                {participant.name}
+                              </span>
+                              <strong>{money(participant.share_amount)}</strong>
+                            </label>
+                          ))}
+                        </div>
+                        <small className="shared-bill-footnote">
+                          Mark a person as paid when their share is repaid. Repayments are not added to income.
+                        </small>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  !sharedBillFormOpen && (
+                    <div className="shared-bill-empty">
+                      {sharedBills.length
+                        ? "Shared bills are available when their statement is selected."
+                        : "No shared bills yet. Select a debit expense to split it between you and two or more people."}
+                    </div>
+                  )
+                )}
+              </section>
 
               <section className="content-grid">
                 <article className="panel cashflow-panel">
@@ -2066,7 +2530,15 @@ function App() {
                               </td>
                               <td className={`amount-cell ${amountDirection}`}>
                                 {amountDirection === "income" ? "+" : "−"}
-                                {money(getAmount(transaction))}
+                                {money(selectedMetric === "total_expenses"
+                                  ? getCountedExpenseAmount(transaction)
+                                  : getAmount(transaction))}
+                                {selectedMetric === "total_expenses" &&
+                                  transaction.shared_bill_owner_share != null && (
+                                    <small className="gross-shared-bill-amount">
+                                      Bank payment: {money(getAmount(transaction))}
+                                    </small>
+                                  )}
                               </td>
                             </tr>
                           );
@@ -2468,6 +2940,56 @@ function App() {
                   <small>{metricDetail.explanation}</small>
                 </section>
 
+                {selectedMetric === "total_income" && upiReceivedTransactions.length > 0 && (
+                  <section className="panel income-choice-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>Choose UPI credits to count as income</h2>
+                        <p>Selected choices are saved to your account and included in income totals.</p>
+                      </div>
+                    </div>
+                    <div className="transaction-table-wrap">
+                      <table className="metric-transactions-table">
+                        <thead>
+                          <tr>
+                            <th>INCLUDE IN INCOME</th>
+                            <th>TRANSACTION</th>
+                            <th>DATE</th>
+                            <th className="amount-column">AMOUNT</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {upiReceivedTransactions.map((transaction, index) => (
+                            <tr key={transaction.id ?? `${transaction.description}-${index}`}>
+                              <td>
+                                <label className="income-inclusion-choice">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(transaction.income_included)}
+                                    disabled={incomeInclusionBusyId === transaction.id}
+                                    onChange={(event) => toggleIncomeInclusion(
+                                      transaction,
+                                      event.target.checked
+                                    )}
+                                  />
+                                  <span>
+                                    {transaction.income_included
+                                      ? "Count as income"
+                                      : "Separate UPI activity"}
+                                  </span>
+                                </label>
+                              </td>
+                              <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
+                              <td className="date-cell">{formatDate(transaction.date)}</td>
+                              <td className="amount-cell income">{money(getAmount(transaction))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
                 <section className="panel transactions-panel metric-transactions-panel">
                   <div className="panel-heading">
                     <div>
@@ -2564,7 +3086,11 @@ function App() {
                               <tr key={transaction.id ?? `${transaction.description}-${index}`}>
                                 <td><span className="category-pill">{getAnalyticsCategory(transaction)}</span></td>
                                 <td><strong className="category-transaction-name">{getTransactionName(transaction)}</strong></td>
-                                <td className="date-cell">{transaction.transaction_type}</td>
+                                <td className="date-cell">
+                                  {transaction.income_included
+                                    ? "income (selected)"
+                                    : transaction.transaction_type}
+                                </td>
                                 <td className="date-cell">{formatDate(transaction.date)}</td>
                                 <td className={`amount-cell ${amountDirection}`}>
                                   {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}

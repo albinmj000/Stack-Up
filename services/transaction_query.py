@@ -2,7 +2,7 @@ from database.database import (
     get_user_transactions,
     get_statement_transactions
 )
-from services.analyzer import get_upi_activity
+from services.analyzer import get_expense_amount, get_upi_activity
 from services.transaction_processor import rule_based_category
 
 
@@ -60,7 +60,11 @@ def get_transaction_totals(user_id):
 
     for transaction in transactions:
 
-        amount = transaction["amount"]
+        amount = (
+            get_expense_amount(transaction)
+            if str(transaction.get("transaction_type") or "").lower() == "expense"
+            else transaction["amount"]
+        )
 
         transaction_type = transaction.get(
             "transaction_type",
@@ -72,6 +76,8 @@ def get_transaction_totals(user_id):
         if upi_activity == "received":
 
             total_upi_received += amount
+            if transaction.get("income_included") in (True, 1):
+                total_income += amount
 
         elif upi_activity == "sent":
 
@@ -146,7 +152,11 @@ def get_statement_totals(
 
     for transaction in transactions:
 
-        amount = transaction["amount"]
+        amount = (
+            get_expense_amount(transaction)
+            if str(transaction.get("transaction_type") or "").lower() == "expense"
+            else transaction["amount"]
+        )
 
         transaction_type = transaction.get(
             "transaction_type",
@@ -158,6 +168,8 @@ def get_statement_totals(
         if upi_activity == "received":
 
             total_upi_received += amount
+            if transaction.get("income_included") in (True, 1):
+                total_income += amount
 
         elif upi_activity == "sent":
 
@@ -227,7 +239,11 @@ def get_category_totals(user_id):
             "Other"
         )
 
-        amount = transaction["amount"]
+        amount = (
+            get_expense_amount(transaction)
+            if str(transaction.get("transaction_type") or "").lower() == "expense"
+            else transaction["amount"]
+        )
 
         if category not in category_totals:
 
@@ -264,7 +280,11 @@ def get_statement_category_totals(
             "Other"
         )
 
-        amount = transaction["amount"]
+        amount = (
+            get_expense_amount(transaction)
+            if str(transaction.get("transaction_type") or "").lower() == "expense"
+            else transaction["amount"]
+        )
 
         if category not in category_totals:
 
@@ -305,7 +325,11 @@ def get_category_total(
             == category.lower()
         ):
 
-            total += transaction["amount"]
+            total += (
+                get_expense_amount(transaction)
+                if str(transaction.get("transaction_type") or "").lower() == "expense"
+                else transaction["amount"]
+            )
 
     return round(
         total,
@@ -338,7 +362,11 @@ def get_statement_category_total(
             == category.lower()
         ):
 
-            total += transaction["amount"]
+            total += (
+                get_expense_amount(transaction)
+                if str(transaction.get("transaction_type") or "").lower() == "expense"
+                else transaction["amount"]
+            )
 
     return round(
         total,

@@ -480,6 +480,8 @@ def delete_user_account(user_id):
         if account is None:
             return False
 
+        connection.execute("DELETE FROM shared_bill_participants WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM shared_bills WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM transactions WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM statements WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM bank_accounts WHERE user_id = ?", (user_id,))
@@ -716,9 +718,21 @@ def create_transactions_table():
                 balance REAL,
                 category TEXT,
                 transaction_type TEXT,
+                income_included INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(transactions)"
+            ).fetchall()
+        }
+        if "income_included" not in columns:
+            connection.execute("""
+                ALTER TABLE transactions
+                ADD COLUMN income_included INTEGER NOT NULL DEFAULT 0
+            """)
 
 
 def add_statement_id_to_transactions():
@@ -775,6 +789,134 @@ def create_bank_accounts_table():
             "CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_name_unique "
             "ON bank_accounts(user_id, LOWER(name))"
         )
+
+
+def create_shared_bills_tables():
+    with get_connection() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS shared_bills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                owner_share REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, transaction_id)
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS shared_bill_participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                shared_bill_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                share_amount REAL NOT NULL,
+                is_paid INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS shared_bill_participants_bill "
+            "ON shared_bill_participants(user_id, shared_bill_id)"
+        )
+
+
+def create_user_shared_bill(user_id, transaction_id, title, owner_share, participants):
+    with get_connection() as connection:
+        if connection.execute(
+            "SELECT 1 FROM shared_bills WHERE user_id = ? AND transaction_id = ?",
+            (user_id, transaction_id),
+        ).fetchone():
+            raise ValueError("This transaction already has a shared bill.")
+
+        try:
+            bill_id = _insert_id(
+                connection,
+                "INSERT INTO shared_bills (user_id, transaction_id, title, owner_share) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, transaction_id, title, owner_share),
+            )
+        except Exception as error:
+            if _is_unique_constraint_violation(error):
+                raise ValueError(
+                    "This transaction already has a shared bill."
+                ) from error
+            raise
+
+        for participant in participants:
+            connection.execute("""
+                INSERT INTO shared_bill_participants (
+                    user_id, shared_bill_id, name, share_amount, is_paid
+                )
+                VALUES (?, ?, ?, ?, 0)
+            """, (
+                user_id,
+                bill_id,
+                participant["name"],
+                participant["share_amount"],
+            ))
+    return bill_id
+
+
+def list_user_shared_bills(user_id):
+    with get_connection() as connection:
+        bills = connection.execute("""
+            SELECT b.id, b.transaction_id, b.title, b.owner_share,
+                   b.created_at, t.date, t.description, t.amount AS gross_amount,
+                   t.category, t.statement_id
+            FROM shared_bills b
+            JOIN transactions t
+              ON t.id = b.transaction_id AND t.user_id = b.user_id
+            WHERE b.user_id = ?
+            ORDER BY b.created_at DESC, b.id DESC
+        """, (user_id,)).fetchall()
+        results = [dict(bill) for bill in bills]
+        for bill in results:
+            participants = connection.execute("""
+                SELECT id, name, share_amount, is_paid
+                FROM shared_bill_participants
+                WHERE user_id = ? AND shared_bill_id = ?
+                ORDER BY id
+            """, (user_id, bill["id"])).fetchall()
+            bill["participants"] = [dict(participant) for participant in participants]
+            bill["repaid_amount"] = round(sum(
+                float(item["share_amount"])
+                for item in bill["participants"]
+                if item["is_paid"]
+            ), 2)
+            bill["amount_owed"] = round(sum(
+                float(item["share_amount"])
+                for item in bill["participants"]
+                if not item["is_paid"]
+            ), 2)
+    return results
+
+
+def set_shared_bill_participant_paid(user_id, bill_id, participant_id, is_paid):
+    with get_connection() as connection:
+        cursor = connection.execute("""
+            UPDATE shared_bill_participants
+            SET is_paid = ?
+            WHERE id = ? AND shared_bill_id = ? AND user_id = ?
+              AND EXISTS (
+                  SELECT 1 FROM shared_bills
+                  WHERE shared_bills.id = shared_bill_participants.shared_bill_id
+                    AND shared_bills.user_id = ?
+              )
+        """, (int(is_paid), participant_id, bill_id, user_id, user_id))
+        return cursor.rowcount > 0
+
+
+def delete_user_shared_bill(user_id, bill_id):
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM shared_bill_participants WHERE user_id = ? AND shared_bill_id = ?",
+            (user_id, bill_id),
+        )
+        cursor = connection.execute(
+            "DELETE FROM shared_bills WHERE user_id = ? AND id = ?",
+            (user_id, bill_id),
+        )
+        return cursor.rowcount > 0
 
 
 def list_user_bank_accounts(user_id):
@@ -921,6 +1063,23 @@ def get_statement(user_id, statement_id):
 def delete_user_statement(user_id, statement_id):
     """Delete one owned statement and all of its saved transactions."""
     with get_connection() as connection:
+        connection.execute("""
+            DELETE FROM shared_bill_participants
+            WHERE user_id = ? AND shared_bill_id IN (
+                SELECT id FROM shared_bills
+                WHERE user_id = ? AND transaction_id IN (
+                    SELECT id FROM transactions
+                    WHERE user_id = ? AND statement_id = ?
+                )
+            )
+        """, (user_id, user_id, user_id, statement_id))
+        connection.execute("""
+            DELETE FROM shared_bills
+            WHERE user_id = ? AND transaction_id IN (
+                SELECT id FROM transactions
+                WHERE user_id = ? AND statement_id = ?
+            )
+        """, (user_id, user_id, statement_id))
         connection.execute(
             "DELETE FROM transactions WHERE user_id = ? AND statement_id = ?",
             (user_id, statement_id),
@@ -1027,6 +1186,23 @@ def replace_statement_transactions(user_id, statement_id, transactions, pdf_data
             )
 
         connection.execute("""
+            DELETE FROM shared_bill_participants
+            WHERE user_id = ? AND shared_bill_id IN (
+                SELECT id FROM shared_bills
+                WHERE user_id = ? AND transaction_id IN (
+                    SELECT id FROM transactions
+                    WHERE user_id = ? AND statement_id = ?
+                )
+            )
+        """, (user_id, user_id, user_id, statement_id))
+        connection.execute("""
+            DELETE FROM shared_bills
+            WHERE user_id = ? AND transaction_id IN (
+                SELECT id FROM transactions
+                WHERE user_id = ? AND statement_id = ?
+            )
+        """, (user_id, user_id, statement_id))
+        connection.execute("""
             DELETE FROM transactions
             WHERE user_id = ? AND statement_id = ?
         """, (user_id, statement_id))
@@ -1071,7 +1247,15 @@ def get_user_transactions(user_id):
         rows = connection.execute("""
             SELECT id, transaction_number, date, description, reference,
                    amount, type, balance, category, transaction_type,
-                   statement_id,
+                   statement_id, income_included,
+                   (SELECT owner_share FROM shared_bills
+                    WHERE shared_bills.transaction_id = transactions.id
+                      AND shared_bills.user_id = transactions.user_id)
+                       AS shared_bill_owner_share,
+                   (SELECT id FROM shared_bills
+                    WHERE shared_bills.transaction_id = transactions.id
+                      AND shared_bills.user_id = transactions.user_id)
+                       AS shared_bill_id,
                    (SELECT bank_account_id FROM statements
                     WHERE statements.id = transactions.statement_id
                       AND statements.user_id = transactions.user_id) AS bank_account_id
@@ -1088,7 +1272,15 @@ def get_statement_transactions(user_id, statement_id):
         rows = connection.execute("""
             SELECT id, transaction_number, date, description, reference,
                    amount, type, balance, category, transaction_type,
-                   statement_id,
+                   statement_id, income_included,
+                   (SELECT owner_share FROM shared_bills
+                    WHERE shared_bills.transaction_id = transactions.id
+                      AND shared_bills.user_id = transactions.user_id)
+                       AS shared_bill_owner_share,
+                   (SELECT id FROM shared_bills
+                    WHERE shared_bills.transaction_id = transactions.id
+                      AND shared_bills.user_id = transactions.user_id)
+                       AS shared_bill_id,
                    (SELECT bank_account_id FROM statements
                     WHERE statements.id = transactions.statement_id
                       AND statements.user_id = transactions.user_id) AS bank_account_id
@@ -1098,6 +1290,16 @@ def get_statement_transactions(user_id, statement_id):
         """, (user_id, statement_id)).fetchall()
 
     return [dict(row) for row in rows]
+
+
+def update_transaction_income_inclusion(user_id, transaction_id, included):
+    with get_connection() as connection:
+        cursor = connection.execute("""
+            UPDATE transactions
+            SET income_included = ?
+            WHERE id = ? AND user_id = ?
+        """, (int(included), transaction_id, user_id))
+        return cursor.rowcount > 0
 
 
 def update_transaction_category(user_id, transaction_id, category, transaction_type):
@@ -1144,6 +1346,7 @@ def initialize_database():
     create_bank_accounts_table()
     create_transactions_table()
     add_statement_id_to_transactions()
+    create_shared_bills_tables()
     create_corrections_table()
 
 

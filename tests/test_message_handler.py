@@ -9,6 +9,20 @@ from services import ai_assistant, message_handler
 
 
 class TransactionTotalTests(unittest.TestCase):
+    def test_user_selected_upi_credit_counts_as_income(self):
+        totals = message_handler.transaction_totals([
+            {
+                "amount": 1500,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "transfer",
+                "income_included": 1,
+            },
+        ])
+
+        self.assertEqual(totals["total_income"], 1500)
+        self.assertEqual(totals["total_upi_received"], 1500)
+
     def test_upi_activity_is_separate_in_assistant_totals(self):
         totals = message_handler.transaction_totals([
             {
@@ -38,8 +52,94 @@ class TransactionTotalTests(unittest.TestCase):
         self.assertEqual(totals["total_upi_received"], 1500)
         self.assertEqual(totals["total_upi_sent"], 500)
 
+    def test_shared_expense_uses_owner_share_in_assistant_summaries(self):
+        transaction = {
+            "amount": 15000,
+            "type": "debit",
+            "category": "Bills & Utilities",
+            "transaction_type": "expense",
+            "shared_bill_owner_share": 7500,
+        }
+
+        totals = message_handler.transaction_totals([transaction])
+        spending = message_handler.spending_summary([transaction])
+
+        self.assertEqual(totals["total_expenses"], 7500)
+        self.assertEqual(spending["Bills & Utilities"], 7500)
+
 
 class OverlappingStatementDeduplicationTests(unittest.TestCase):
+    def test_shared_bill_owner_share_is_preserved_when_overlapping_rows_deduplicate(self):
+        transactions = [
+            {
+                "id": 1,
+                "statement_id": 10,
+                "bank_account_id": 7,
+                "date": "2026-09-18",
+                "description": "Rent payment",
+                "amount": 15000,
+                "type": "debit",
+                "transaction_type": "expense",
+                "category": "Bills & Utilities",
+            },
+            {
+                "id": 2,
+                "statement_id": 11,
+                "bank_account_id": 7,
+                "date": "2026-09-18",
+                "description": "Rent payment",
+                "amount": 15000,
+                "type": "debit",
+                "transaction_type": "expense",
+                "category": "Bills & Utilities",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_id": 4,
+            },
+        ]
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            transactions
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["shared_bill_owner_share"], 7500)
+        self.assertEqual(result[0]["shared_bill_id"], 4)
+
+    def test_keeps_manual_income_choice_when_duplicate_is_in_other_statement(self):
+        transactions = [
+            {
+                "id": 1,
+                "statement_id": 10,
+                "bank_account_id": 7,
+                "date": "2026-09-18",
+                "description": "UPI/P2P/ALICE/UPI",
+                "amount": 8000,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "transfer",
+                "income_included": 0,
+            },
+            {
+                "id": 2,
+                "statement_id": 11,
+                "bank_account_id": 7,
+                "date": "2026-09-18",
+                "description": "UPI P2P ALICE UPI",
+                "amount": 8000,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "transfer",
+                "income_included": 1,
+            },
+        ]
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            transactions
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0]["income_included"])
+
     def test_deduplicates_reference_and_normalized_details_across_statements(self):
         transactions = [
             {
@@ -496,6 +596,30 @@ class FinancialQuestionPromptTests(unittest.TestCase):
         self.assertIn('"amount_inr":100', prompt)
         self.assertIn("Recent transaction details omitted: 70", prompt)
         self.assertNotIn("x" * 101, prompt)
+
+    @patch.object(ai_assistant, "get_client")
+    def test_prompt_marks_manually_included_upi_as_income(self, get_client):
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(
+                '{"intent":"general","category":null,"answer":"Income includes selected credits."}'
+            )
+        )
+        ai_assistant.understand_financial_question(
+            "What is my income?",
+            [{
+                "amount": 1500,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "transfer",
+                "income_included": 1,
+            }],
+        )
+
+        prompt = get_client.return_value.chat.completions.create.call_args.kwargs[
+            "messages"
+        ][0]["content"]
+        self.assertIn('"income":1500.0', prompt)
+        self.assertIn('"included_in_income":true', prompt)
 
     @patch.object(ai_assistant, "get_client")
     def test_prompt_reports_upi_activity_separately_from_income(self, get_client):

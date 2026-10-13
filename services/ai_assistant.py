@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from services.analyzer import get_upi_activity
+from services.analyzer import get_expense_amount, get_upi_activity
 
 load_dotenv()
 
@@ -149,9 +149,13 @@ def understand_financial_question(question, transactions=None, history=None):
             "date": transaction.get("date"),
             "description": str(transaction.get("description") or "")[:100],
             "amount_inr": transaction.get("amount"),
+            "shared_bill_owner_share_inr": transaction.get(
+                "shared_bill_owner_share"
+            ),
             "bank_direction": transaction.get("type"),
             "category": transaction.get("category"),
             "financial_type": transaction.get("transaction_type"),
+            "included_in_income": bool(transaction.get("income_included")),
         }
         for transaction in recent_transactions
     ]
@@ -165,11 +169,19 @@ def understand_financial_question(question, transactions=None, history=None):
         ).lower()
         upi_activity = get_upi_activity(transaction)
         if upi_activity:
-            financial_type = f"upi_{upi_activity}"
+            financial_type = (
+                "income"
+                if upi_activity == "received" and transaction.get("income_included")
+                else f"upi_{upi_activity}"
+            )
         elif category.casefold() == "transfer":
             financial_type = "transfer"
         try:
-            amount = abs(float(transaction.get("amount") or 0))
+            amount = (
+                get_expense_amount(transaction)
+                if financial_type == "expense"
+                else abs(float(transaction.get("amount") or 0))
+            )
         except (TypeError, ValueError):
             continue
         totals_by_category[category] = round(
@@ -203,7 +215,8 @@ For personal finance claims, distinguish selected-statement facts from estimates
 general explanations. Do not describe statement-period totals as monthly without evidence.
 UPI Received and UPI Sent amounts are tracked separately and are excluded from income
 and expenses, respectively. Do not add these UPI totals into income, expenses, or net
-cash flow when answering a question.
+cash flow unless an individual UPI Received transaction is explicitly marked
+included_in_income=true; those selected credits are included in income.
 Treat amounts and facts in user messages as user-provided, not independently verified.
 Do not claim live facts are verified unless web search results are supplied.
 When current prices, specifications, offers, or other time-sensitive facts are needed,

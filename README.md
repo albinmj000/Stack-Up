@@ -11,8 +11,16 @@ from only the selected PDFs. Identical transaction details are not deduplicated
 across different named bank accounts.
 
 UPI Received and UPI Sent activity is shown separately on the dashboard and in
-analytics; it is excluded from income, expenses, net cash flow, and savings-rate
-calculations. Other outgoing transfers remain included in total expenses.
+analytics. UPI Sent stays outside expenses; UPI Received credits are excluded
+from income by default, but a user can select individual credits in the Total
+Income details to include them. Selected credits are saved per transaction and
+account. Other outgoing transfers remain included in total expenses.
+
+Shared bills can be linked to eligible debit expense transactions and split
+between the account owner and other people using equal or custom shares. The
+original bank payment remains visible, while the owner's share is used for
+expense totals and spending analysis. Repayments can be marked per participant;
+they reduce the amount owed and are not counted as income.
 
 ## Project layout
 

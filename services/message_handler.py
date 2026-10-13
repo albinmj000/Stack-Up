@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from groq import APIConnectionError, APITimeoutError, RateLimitError
-from services.analyzer import get_upi_activity
+from services.analyzer import get_expense_amount, get_upi_activity
 from services.correction_parser import process_correction_message
 from services.ai_assistant import (
     calculate_emi_from_conversation,
@@ -118,6 +118,8 @@ def transaction_totals(transactions):
         upi_activity = get_upi_activity(transaction)
         if upi_activity == "received":
             totals["total_upi_received"] += amount
+            if transaction.get("income_included") in (True, 1):
+                totals["total_income"] += amount
         elif upi_activity == "sent":
             totals["total_upi_sent"] += amount
         elif category == "transfer" or transaction_type == "transfer":
@@ -129,7 +131,7 @@ def transaction_totals(transactions):
         elif transaction_type == "income":
             totals["total_income"] += amount
         elif transaction_type == "expense":
-            totals["total_expenses"] += amount
+            totals["total_expenses"] += get_expense_amount(transaction)
         else:
             totals["total_unknown"] += amount
     return {name: round(value, 2) for name, value in totals.items()}
@@ -211,7 +213,28 @@ def deduplicate_overlapping_statement_transactions(transactions):
                 for other_statement, count in statement_occurrences.items()
             ):
                 duplicate_in_another_statement = True
-        if not duplicate_in_another_statement:
+        if duplicate_in_another_statement:
+            for existing in deduplicated:
+                if (
+                    existing.get("bank_account_id")
+                    == transaction.get("bank_account_id")
+                    and existing.get("statement_id") != statement_id
+                    and any(
+                        key in _transaction_overlap_keys(existing)
+                        for key in keys
+                    )
+                ):
+                    if transaction.get("income_included"):
+                        existing["income_included"] = True
+                    if transaction.get("shared_bill_owner_share") is not None:
+                        existing["shared_bill_owner_share"] = transaction[
+                            "shared_bill_owner_share"
+                        ]
+                        existing["shared_bill_id"] = transaction.get(
+                            "shared_bill_id"
+                        )
+                    break
+        else:
             deduplicated.append(transaction)
     return deduplicated
 
@@ -230,7 +253,7 @@ def spending_summary(transactions):
             continue
         category = transaction.get("category") or "Other"
         totals[category] = totals.get(category, 0.0) + abs(
-            float(transaction.get("amount") or 0)
+            get_expense_amount(transaction)
         )
     return {name: round(amount, 2) for name, amount in totals.items()}
 
@@ -244,7 +267,7 @@ def category_transactions(transactions, category):
 
 def category_total(transactions, category):
     return round(sum(
-        abs(float(transaction.get("amount") or 0))
+        get_expense_amount(transaction)
         for transaction in category_transactions(transactions, category)
     ), 2)
 

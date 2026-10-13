@@ -75,7 +75,149 @@ class DatabaseTests(unittest.TestCase):
         saved = database.get_statement_transactions("user-a", statement_id)
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["description"], "Cafe")
+        self.assertEqual(saved[0]["income_included"], 0)
         self.assertEqual(database.get_statement_pdf("user-a", statement_id)["pdf_data"], b"pdf-data")
+
+    def test_shared_bill_persists_owner_share_and_scopes_repayments(self):
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "Monthly rent",
+            "amount": 15000.0,
+            "type": "debit",
+            "balance": 0,
+            "category": "Bills & Utilities",
+            "transaction_type": "expense",
+        }
+        statement_id, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "rent.pdf", [transaction], b"pdf",
+        )
+        transaction_id = database.get_statement_transactions(
+            "user-a", statement_id
+        )[0]["id"]
+        bill_id = database.create_user_shared_bill(
+            "user-a",
+            transaction_id,
+            "Monthly rent",
+            7500,
+            [
+                {"name": "Alex", "share_amount": 5000},
+                {"name": "Sam", "share_amount": 2500},
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "already has a shared bill"):
+            database.create_user_shared_bill(
+                "user-a",
+                transaction_id,
+                "Duplicate rent",
+                7500,
+                [{"name": "Alex", "share_amount": 7500}],
+            )
+        bill = database.list_user_shared_bills("user-a")[0]
+
+        self.assertEqual(bill["id"], bill_id)
+        self.assertEqual(bill["gross_amount"], 15000)
+        self.assertEqual(bill["owner_share"], 7500)
+        self.assertEqual(bill["amount_owed"], 7500)
+        self.assertTrue(database.set_shared_bill_participant_paid(
+            "user-a", bill_id, bill["participants"][0]["id"], True
+        ))
+        self.assertFalse(database.set_shared_bill_participant_paid(
+            "user-b", bill_id, bill["participants"][1]["id"], True
+        ))
+        updated_bill = database.list_user_shared_bills("user-a")[0]
+        self.assertEqual(updated_bill["repaid_amount"], 5000)
+        self.assertEqual(updated_bill["amount_owed"], 2500)
+
+        saved_transaction = database.get_statement_transactions(
+            "user-a", statement_id
+        )[0]
+        self.assertEqual(saved_transaction["shared_bill_id"], bill_id)
+        self.assertEqual(saved_transaction["shared_bill_owner_share"], 7500)
+        self.assertTrue(database.delete_user_shared_bill("user-a", bill_id))
+        self.assertIsNone(
+            database.get_statement_transactions("user-a", statement_id)[0][
+                "shared_bill_owner_share"
+            ]
+        )
+
+    def test_statement_replacement_clears_its_shared_bill_tracking(self):
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "Shared dinner",
+            "amount": 100,
+            "type": "debit",
+            "balance": 0,
+            "category": "Food",
+            "transaction_type": "expense",
+        }
+        statement_id, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "dinner.pdf", [transaction], b"pdf",
+        )
+        transaction_id = database.get_statement_transactions(
+            "user-a", statement_id
+        )[0]["id"]
+        database.create_user_shared_bill(
+            "user-a",
+            transaction_id,
+            "Dinner",
+            50,
+            [{"name": "Alex", "share_amount": 50}],
+        )
+
+        database.replace_statement_transactions(
+            "user-a",
+            statement_id,
+            [{**transaction, "description": "Updated dinner"}],
+        )
+
+        self.assertEqual(database.list_user_shared_bills("user-a"), [])
+        replaced = database.get_statement_transactions("user-a", statement_id)
+        self.assertEqual(len(replaced), 1)
+        self.assertIsNone(replaced[0]["shared_bill_owner_share"])
+
+    def test_income_inclusion_is_saved_and_scoped_to_the_user(self):
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "UPI/P2P/Person",
+            "amount": 8000.0,
+            "type": "credit",
+            "category": "UPI Received",
+            "transaction_type": "transfer",
+        }
+        owner_statement, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "owner.pdf", [transaction], b"owner-pdf",
+        )
+        other_statement, _ = database.save_statement_with_transactions(
+            "user-b", "b" * 64, "other.pdf", [transaction], b"other-pdf",
+        )
+        owner_transaction_id = database.get_statement_transactions(
+            "user-a", owner_statement
+        )[0]["id"]
+        other_transaction_id = database.get_statement_transactions(
+            "user-b", other_statement
+        )[0]["id"]
+
+        self.assertTrue(database.update_transaction_income_inclusion(
+            "user-a", owner_transaction_id, True
+        ))
+        self.assertFalse(database.update_transaction_income_inclusion(
+            "user-a", other_transaction_id, True
+        ))
+        self.assertEqual(
+            database.get_statement_transactions("user-a", owner_statement)[0][
+                "income_included"
+            ],
+            1,
+        )
+        self.assertEqual(
+            database.get_statement_transactions("user-b", other_statement)[0][
+                "income_included"
+            ],
+            0,
+        )
 
     def test_bank_accounts_and_statement_assignments_are_user_scoped(self):
         account_id = database.create_user_bank_account("user-a", "Everyday account")["id"]
@@ -170,12 +312,23 @@ class DatabaseTests(unittest.TestCase):
         statement_id, _ = database.save_statement_with_transactions(
             "user-a", "a" * 64, "statement.pdf", [transaction], b"pdf-data",
         )
+        transaction_id = database.get_statement_transactions(
+            "user-a", statement_id
+        )[0]["id"]
+        database.create_user_shared_bill(
+            "user-a",
+            transaction_id,
+            "Cafe with a friend",
+            60,
+            [{"name": "Alex", "share_amount": 65}],
+        )
 
         self.assertFalse(database.delete_user_statement("user-b", statement_id))
         self.assertIsNotNone(database.get_statement("user-a", statement_id))
         self.assertTrue(database.delete_user_statement("user-a", statement_id))
         self.assertIsNone(database.get_statement("user-a", statement_id))
         self.assertEqual(database.get_statement_transactions("user-a", statement_id), [])
+        self.assertEqual(database.list_user_shared_bills("user-a"), [])
 
     def test_merchant_corrections_are_account_scoped(self):
         save_correction("user-a", "cafe", "Food")

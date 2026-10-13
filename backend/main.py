@@ -9,6 +9,7 @@ import secrets
 import tempfile
 import urllib.request
 import urllib.error
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
 from fastapi import FastAPI, UploadFile, File, Form, Request, Query, Body, HTTPException, Response
@@ -26,7 +27,7 @@ from services.statement_parser import (
     extract_transactions_from_text,
 )
 from services.transaction_processor import categorize_transactions
-from services.analyzer import analyze_transactions
+from services.analyzer import analyze_transactions, get_upi_activity
 from services.message_handler import (
     deduplicate_overlapping_statement_transactions,
     handle_user_message,
@@ -45,6 +46,11 @@ from database.database import (
     get_statement_pdf,
     save_statement_pdf,
     get_user_transactions,
+    update_transaction_income_inclusion,
+    create_user_shared_bill,
+    list_user_shared_bills,
+    set_shared_bill_participant_paid,
+    delete_user_shared_bill,
     list_user_statements,
     list_user_bank_accounts,
     create_user_bank_account,
@@ -811,6 +817,167 @@ async def change_transaction_category(
         "counterparty": counterparty,
         "analysis": analyze_transactions(statement_transactions),
     }
+
+
+@app.patch("/transactions/{transaction_id}/income-inclusion")
+async def change_transaction_income_inclusion(
+    transaction_id: int,
+    request: Request,
+    payload: dict = Body(...),
+):
+    user_id = authenticated_account(request)["user_id"]
+    included = payload.get("included")
+    if not isinstance(included, bool):
+        raise HTTPException(status_code=400, detail="Choose whether to include this transaction in income.")
+
+    transaction = next(
+        (item for item in get_user_transactions(user_id)
+         if item.get("id") == transaction_id),
+        None,
+    )
+    if transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    if (
+        str(transaction.get("type") or "").strip().lower() != "credit"
+        or get_upi_activity(transaction) != "received"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Only UPI Received credits can be manually included in income.",
+        )
+    if not update_transaction_income_inclusion(user_id, transaction_id, included):
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+
+    return {
+        "status": "success",
+        "transaction_id": transaction_id,
+        "income_included": included,
+    }
+
+
+def _shared_bill_cents(value):
+    if isinstance(value, bool):
+        raise ValueError("Enter a valid amount.")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError("Enter a valid amount.") from None
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("Amounts must be finite and cannot be negative.")
+    cents = amount * 100
+    if cents != cents.to_integral_value():
+        raise ValueError("Use no more than two decimal places.")
+    return int(cents)
+
+
+@app.get("/shared-bills")
+async def shared_bills(request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    return {"shared_bills": list_user_shared_bills(user_id)}
+
+
+@app.post("/shared-bills")
+async def create_shared_bill(request: Request, payload: dict = Body(...)):
+    user_id = authenticated_account(request)["user_id"]
+    transaction_id = payload.get("transaction_id")
+    if isinstance(transaction_id, bool) or not isinstance(transaction_id, int):
+        raise HTTPException(status_code=400, detail="Choose a valid transaction.")
+
+    transactions = get_user_transactions(user_id)
+    transaction = next(
+        (item for item in transactions if item.get("id") == transaction_id),
+        None,
+    )
+    if transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+    if (
+        str(transaction.get("type") or "").strip().lower() != "debit"
+        or str(transaction.get("transaction_type") or "").strip().lower() != "expense"
+        or get_upi_activity(transaction)
+        or transaction.get("shared_bill_id") is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Choose an expense debit that is not already part of a shared bill.",
+        )
+
+    title = str(payload.get("title") or "").strip()
+    if not title or len(title) > 120:
+        raise HTTPException(status_code=400, detail="Bill details must be 1–120 characters.")
+
+    raw_participants = payload.get("participants")
+    if not isinstance(raw_participants, list) or not 1 <= len(raw_participants) <= 19:
+        raise HTTPException(
+            status_code=400,
+            detail="Add between 1 and 19 other people to split this bill.",
+        )
+
+    try:
+        gross_cents = _shared_bill_cents(transaction.get("amount"))
+        owner_cents = _shared_bill_cents(payload.get("owner_share"))
+        participants = []
+        for participant in raw_participants:
+            if not isinstance(participant, dict):
+                raise ValueError("Each person needs a name and share.")
+            name = str(participant.get("name") or "").strip()
+            if not name or len(name) > 80:
+                raise ValueError("Each person's name must be 1–80 characters.")
+            share_cents = _shared_bill_cents(participant.get("share_amount"))
+            if share_cents <= 0:
+                raise ValueError("Each other person's share must be greater than zero.")
+            participants.append({
+                "name": name,
+                "share_amount": share_cents / 100,
+            })
+    except ValueError as validation_error:
+        raise HTTPException(status_code=400, detail=str(validation_error)) from validation_error
+
+    if owner_cents + sum(
+        round(item["share_amount"] * 100) for item in participants
+    ) != gross_cents:
+        raise HTTPException(
+            status_code=400,
+            detail="Your share and everyone's share must add up to the transaction amount.",
+        )
+
+    try:
+        create_user_shared_bill(
+            user_id,
+            transaction_id,
+            title,
+            owner_cents / 100,
+            participants,
+        )
+    except ValueError as create_error:
+        raise HTTPException(status_code=409, detail=str(create_error)) from create_error
+
+    return {"status": "success", "shared_bills": list_user_shared_bills(user_id)}
+
+
+@app.patch("/shared-bills/{bill_id}/participants/{participant_id}")
+async def update_shared_bill_repayment(
+    bill_id: int,
+    participant_id: int,
+    request: Request,
+    payload: dict = Body(...),
+):
+    user_id = authenticated_account(request)["user_id"]
+    is_paid = payload.get("is_paid")
+    if not isinstance(is_paid, bool):
+        raise HTTPException(status_code=400, detail="Choose whether this person repaid you.")
+    if not set_shared_bill_participant_paid(
+        user_id, bill_id, participant_id, is_paid
+    ):
+        raise HTTPException(status_code=404, detail="Shared bill participant not found.")
+    return {"status": "success", "shared_bills": list_user_shared_bills(user_id)}
+
+
+@app.delete("/shared-bills/{bill_id}")
+async def remove_shared_bill(bill_id: int, request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    if not delete_user_shared_bill(user_id, bill_id):
+        raise HTTPException(status_code=404, detail="Shared bill not found.")
+    return {"status": "success", "shared_bills": list_user_shared_bills(user_id)}
 
 
 @app.get("/statements")

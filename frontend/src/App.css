@@ -939,6 +939,236 @@ border-color: #293a2e;
 .savings-limit-panel.limit-medium { border-color: rgba(245, 190, 87, 0.48); }
 .savings-limit-panel.limit-hard { border-color: rgba(244, 106, 106, 0.52); }
 
+.shared-bills-panel {
+display: grid;
+gap: 16px;
+margin-bottom: 20px;
+}
+
+.shared-bills-panel > .panel-heading {
+margin: 0;
+}
+
+.shared-bills-panel > .panel-heading h2 {
+margin: 7px 0 5px;
+}
+
+.shared-bills-panel > .panel-heading p {
+margin: 0;
+color: #829087;
+font-size: 11px;
+line-height: 1.6;
+}
+
+.shared-bill-form {
+display: grid;
+gap: 13px;
+padding: 16px;
+border: 1px solid #293b2f;
+border-radius: 11px;
+background: rgba(255, 255, 255, 0.018);
+}
+
+.shared-bill-form > label,
+.shared-bill-share-fields > label,
+.shared-bill-person-fields > label {
+display: grid;
+gap: 6px;
+min-width: 0;
+color: #a9b8ad;
+font-size: 10px;
+font-weight: 600;
+}
+
+.shared-bill-form input,
+.shared-bill-form select {
+width: 100%;
+min-width: 0;
+min-height: 39px;
+padding: 0 10px;
+border: 1px solid #2d4234;
+border-radius: 8px;
+color: #e8f0e9;
+background: #0b120e;
+font-size: 11px;
+}
+
+.shared-bill-form-heading,
+.shared-bill-form-footer {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 12px;
+}
+
+.shared-bill-form-heading > div {
+display: grid;
+gap: 4px;
+}
+
+.shared-bill-form-heading strong {
+color: #e8f0e9;
+font-size: 12px;
+}
+
+.shared-bill-form-heading small,
+.shared-bill-form-note {
+color: #829087;
+font-size: 10px;
+line-height: 1.6;
+}
+
+.shared-bill-share-fields {
+display: grid;
+gap: 10px;
+}
+
+.shared-bill-person-fields {
+display: grid;
+grid-template-columns: minmax(0, 1fr) minmax(130px, 0.6fr) 30px;
+align-items: end;
+gap: 9px;
+}
+
+.shared-bill-remove-person,
+.shared-bill-delete {
+display: grid;
+width: 30px;
+height: 30px;
+place-items: center;
+border: 1px solid #34483a;
+border-radius: 8px;
+color: #a8b9ad;
+background: #101812;
+}
+
+.shared-bill-remove-person:hover,
+.shared-bill-delete:hover {
+border-color: #bd6a6a;
+color: #ff9e9e;
+}
+
+.shared-bill-empty {
+padding: 14px;
+border: 1px dashed #34483a;
+border-radius: 9px;
+color: #91a095;
+font-size: 11px;
+line-height: 1.7;
+}
+
+.shared-bill-list {
+display: grid;
+gap: 12px;
+}
+
+.shared-bill-card {
+display: grid;
+gap: 14px;
+padding: 16px;
+border: 1px solid #293b2f;
+border-radius: 11px;
+background: linear-gradient(145deg, #101812, #0c120e);
+}
+
+.shared-bill-card-heading {
+display: flex;
+align-items: flex-start;
+justify-content: space-between;
+gap: 12px;
+}
+
+.shared-bill-card-heading > div {
+display: grid;
+gap: 5px;
+min-width: 0;
+}
+
+.shared-bill-card-heading strong {
+color: #e8f0e9;
+font-size: 13px;
+overflow-wrap: anywhere;
+}
+
+.shared-bill-card-heading small {
+color: #829087;
+font-size: 10px;
+overflow-wrap: anywhere;
+}
+
+.shared-bill-summary {
+display: grid;
+grid-template-columns: repeat(4, minmax(0, 1fr));
+gap: 9px;
+}
+
+.shared-bill-summary > div {
+display: grid;
+align-content: start;
+gap: 6px;
+min-width: 0;
+padding: 11px;
+border: 1px solid #26372c;
+border-radius: 9px;
+background: rgba(255, 255, 255, 0.02);
+}
+
+.shared-bill-summary span {
+color: #829087;
+font-size: 9px;
+line-height: 1.5;
+}
+
+.shared-bill-summary strong {
+color: #a8e9c1;
+font-size: 13px;
+overflow-wrap: anywhere;
+}
+
+.shared-bill-participants {
+display: grid;
+gap: 7px;
+}
+
+.shared-bill-participant,
+.shared-bill-participant > span {
+display: flex;
+align-items: center;
+}
+
+.shared-bill-participant {
+justify-content: space-between;
+gap: 12px;
+color: #b8c6bc;
+font-size: 11px;
+}
+
+.shared-bill-participant > span {
+gap: 8px;
+}
+
+.shared-bill-participant input {
+width: 15px;
+height: 15px;
+margin: 0;
+accent-color: #62e6a7;
+}
+
+.shared-bill-participant strong {
+color: #e8f0e9;
+font-size: 11px;
+}
+
+.shared-bill-participant.owner-share {
+color: #a8e9c1;
+}
+
+.shared-bill-footnote {
+color: #829087;
+font-size: 9px;
+line-height: 1.6;
+}
+
 .savings-limit-heading {
 display: flex;
 align-items: flex-start;
@@ -2239,6 +2469,39 @@ font-size: 11px;
 line-height: 1.7;
 }
 
+.income-choice-panel {
+display: grid;
+gap: 14px;
+margin-bottom: 16px;
+}
+
+.income-choice-panel .panel-heading {
+margin-bottom: 0;
+}
+
+.income-inclusion-choice {
+display: inline-flex;
+align-items: center;
+gap: 8px;
+min-width: 145px;
+color: #a8e9c1;
+font-size: 11px;
+font-weight: 600;
+cursor: pointer;
+}
+
+.income-inclusion-choice input {
+width: 16px;
+height: 16px;
+margin: 0;
+accent-color: #62e6a7;
+}
+
+.income-inclusion-choice input:disabled {
+cursor: wait;
+opacity: 0.55;
+}
+
 .metric-transactions-panel {
 min-height: 260px;
 }
@@ -2915,6 +3178,20 @@ grid-template-columns: repeat(2, minmax(0, 1fr));
 
 .analytics-totals {
 grid-template-columns: minmax(0, 1fr);
+}
+
+.shared-bill-summary {
+grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.shared-bill-form-footer {
+align-items: stretch;
+flex-direction: column;
+}
+
+.shared-bill-form-footer .primary-button {
+width: 100%;
+justify-content: center;
 }
 
 .upi-activity-panel {
@@ -3772,6 +4049,59 @@ background: linear-gradient(145deg, #ffffff, #f9fbf9);
 box-shadow: 0 6px 18px rgba(26, 68, 42, 0.035);
 }
 
+:root[data-theme="light"] .shared-bill-form,
+:root[data-theme="light"] .shared-bill-card {
+border-color: #dce8df;
+background: linear-gradient(145deg, #ffffff, #f7faf8);
+}
+
+:root[data-theme="light"] .shared-bill-form > label,
+:root[data-theme="light"] .shared-bill-share-fields > label,
+:root[data-theme="light"] .shared-bill-person-fields > label,
+:root[data-theme="light"] .shared-bill-participant,
+:root[data-theme="light"] .shared-bill-empty {
+color: #53685a;
+}
+
+:root[data-theme="light"] .shared-bill-form input,
+:root[data-theme="light"] .shared-bill-form select {
+border-color: #ceded2;
+color: #25372b;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .shared-bill-card-heading strong,
+:root[data-theme="light"] .shared-bill-form-heading strong,
+:root[data-theme="light"] .shared-bill-participant strong {
+color: #293d30;
+}
+
+:root[data-theme="light"] .shared-bill-summary > div {
+border-color: #dce8df;
+background: #f6faf7;
+}
+
+:root[data-theme="light"] .shared-bill-summary strong,
+:root[data-theme="light"] .shared-bill-participant.owner-share {
+color: #187845;
+}
+
+:root[data-theme="light"] .shared-bill-remove-person,
+:root[data-theme="light"] .shared-bill-delete {
+border-color: #d2e0d5;
+color: #52695a;
+background: #f6faf7;
+}
+
+:root[data-theme="light"] .shared-bill-form-heading small,
+:root[data-theme="light"] .shared-bill-form-note,
+:root[data-theme="light"] .shared-bill-card-heading small,
+:root[data-theme="light"] .shared-bill-summary span,
+:root[data-theme="light"] .shared-bill-footnote,
+:root[data-theme="light"] .shared-bills-panel > .panel-heading p {
+color: #607365;
+}
+
 :root[data-theme="light"] .savings-limit-panel {
 border-color: #d7e6da;
 }
@@ -4027,6 +4357,14 @@ background: #f6faf7;
 
 :root[data-theme="light"] .upi-activity-grid article strong {
 color: #16864a;
+}
+
+:root[data-theme="light"] .income-inclusion-choice {
+color: #205a33;
+}
+
+:root[data-theme="light"] .income-inclusion-choice input {
+accent-color: #16864a;
 }
 
 :root[data-theme="light"] .upi-analytics-totals article {
