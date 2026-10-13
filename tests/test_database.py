@@ -76,6 +76,48 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(saved[0]["description"], "Cafe")
         self.assertEqual(database.get_statement_pdf("user-a", statement_id)["pdf_data"], b"pdf-data")
 
+    def test_bulk_category_update_is_scoped_to_the_user(self):
+        transaction = {
+            "transaction_number": 1,
+            "date": "2026-01-02",
+            "description": "UPI/P2P/123/Seeta/UPI/BANK",
+            "amount": 125.0,
+            "type": "debit",
+            "balance": 875.0,
+            "category": "UPI Sent",
+            "transaction_type": "transfer",
+        }
+        owner_statement, _ = database.save_statement_with_transactions(
+            "user-a", "a" * 64, "owner.pdf", [transaction], b"owner-pdf",
+        )
+        other_statement, _ = database.save_statement_with_transactions(
+            "user-b", "b" * 64, "other.pdf", [transaction], b"other-pdf",
+        )
+        owner_transaction_id = database.get_statement_transactions(
+            "user-a", owner_statement
+        )[0]["id"]
+        other_transaction_id = database.get_statement_transactions(
+            "user-b", other_statement
+        )[0]["id"]
+
+        updated_count = database.update_transaction_categories(
+            "user-a",
+            [
+                (owner_transaction_id, "Food", "expense"),
+                (other_transaction_id, "Food", "expense"),
+            ],
+        )
+
+        self.assertEqual(updated_count, 1)
+        self.assertEqual(
+            database.get_statement_transactions("user-a", owner_statement)[0]["category"],
+            "Food",
+        )
+        self.assertEqual(
+            database.get_statement_transactions("user-b", other_statement)[0]["category"],
+            "UPI Sent",
+        )
+
     def test_delete_statement_removes_only_owned_statement_and_transactions(self):
         transaction = {
             "transaction_number": 1,

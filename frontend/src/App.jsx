@@ -642,13 +642,28 @@ function App() {
       if (!response.ok || result.status !== "success") {
         throw new Error(result.message || "Could not update this category.");
       }
+      const updatedIds = new Set(result.updated_transaction_ids ?? [transaction.id]);
       setTransactions((previous) => previous.map((item) =>
-        item.id === transaction.id
-          ? { ...item, category, transaction_type: result.transaction_type }
+        updatedIds.has(item.id)
+          ? {
+              ...item,
+              category,
+              transaction_type: item.id === transaction.id
+                ? result.transaction_type
+                : String(item.type || "").toLowerCase() === "credit"
+                  ? (category === "Transfer" ? "transfer" : "income")
+                  : String(item.type || "").toLowerCase() === "debit"
+                    ? (category === "Transfer" ? "transfer" : "expense")
+                    : "unknown",
+            }
           : item
       ));
       setAnalysis(result.analysis);
-      setNotice(`Category saved as ${category}.`);
+      setNotice(
+        result.updated_count > 1
+          ? `Category saved as ${category} for ${result.updated_count} transactions to ${result.counterparty}.`
+          : `Category saved as ${category}.`
+      );
     } catch (err) {
       setError(err.message);
     }
@@ -1758,7 +1773,7 @@ function App() {
               <div className="panel-heading">
                 <div>
                   <h2>Transactions</h2>
-                  <p>{filteredTransactions.length} of {transactions.length} transactions shown. Select a category to correct it; your UPI choices are remembered for next time.</p>
+                  <p>{filteredTransactions.length} of {transactions.length} transactions shown. Changing a UPI category updates matching transactions and is remembered for future payments.</p>
                 </div>
                 <label className="upload-button">
                   <Upload size={17} /> Upload statement

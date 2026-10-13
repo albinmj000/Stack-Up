@@ -826,13 +826,24 @@ def get_statement_transactions(user_id, statement_id):
 
 
 def update_transaction_category(user_id, transaction_id, category, transaction_type):
+    return update_transaction_categories(
+        user_id,
+        [(transaction_id, category, transaction_type)],
+    ) > 0
+
+
+def update_transaction_categories(user_id, transaction_updates):
+    """Update multiple owned transactions atomically."""
     with get_connection() as connection:
-        cursor = connection.execute("""
-            UPDATE transactions
-            SET category = ?, transaction_type = ?
-            WHERE id = ? AND user_id = ?
-        """, (category, transaction_type, transaction_id, user_id))
-        return cursor.rowcount > 0
+        updated_count = 0
+        for transaction_id, category, transaction_type in transaction_updates:
+            cursor = connection.execute("""
+                UPDATE transactions
+                SET category = ?, transaction_type = ?
+                WHERE id = ? AND user_id = ?
+            """, (category, transaction_type, transaction_id, user_id))
+            updated_count += cursor.rowcount
+    return updated_count
 
 
 def get_saved_statement_data(user_id, file_hash):

@@ -102,6 +102,25 @@ def extract_counterparty(description):
     return str(description).strip()
 
 
+def transactions_for_same_counterparty(transactions, transaction):
+    """Return this UPI transaction and other UPI rows for the same exact party."""
+    description = str(transaction.get("description") or "")
+    if not re.search(r"\bupi\b", description, re.IGNORECASE):
+        return [transaction]
+
+    counterparty = extract_counterparty(description).strip().casefold()
+    if not counterparty:
+        return [transaction]
+
+    matches = [
+        item
+        for item in transactions
+        if re.search(r"\bupi\b", str(item.get("description") or ""), re.IGNORECASE)
+        and extract_counterparty(item.get("description")).strip().casefold() == counterparty
+    ]
+    return matches or [transaction]
+
+
 def keyword_matches(keyword, text):
     """Avoid matching short merchant words inside a person's name."""
     keyword = str(keyword).strip().lower()

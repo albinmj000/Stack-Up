@@ -36,7 +36,7 @@ from database.database import (
     get_statement_id,
     get_statement_transactions,
     get_statement,
-    update_transaction_category,
+    update_transaction_categories,
     get_statement_pdf,
     save_statement_pdf,
     get_user_transactions,
@@ -59,7 +59,11 @@ from database.database import (
     get_session_user,
     delete_auth_session,
 )
-from services.transaction_processor import determine_transaction_type, extract_counterparty
+from services.transaction_processor import (
+    determine_transaction_type,
+    extract_counterparty,
+    transactions_for_same_counterparty,
+)
 from database.corrections import save_correction
 from services.auth_service import (
     normalize_contact,
@@ -518,24 +522,33 @@ async def change_transaction_category(
 
     # Determine the account direction first; the category decides whether
     # this movement counts as income, expense, or a transfer.
+    user_transactions = get_user_transactions(user_id)
     transaction = next(
-        (item for item in get_user_transactions(user_id)
+        (item for item in user_transactions
          if item.get("id") == transaction_id),
         None,
     )
     if transaction is None:
         return {"status": "error", "message": "Transaction not found."}
 
-    transaction_type = determine_transaction_type(transaction, category)
-    updated = update_transaction_category(
-        user_id, transaction_id, category, transaction_type
+    matching_transactions = transactions_for_same_counterparty(
+        user_transactions,
+        transaction,
     )
-    if not updated:
+    transaction_updates = [
+        (
+            item["id"],
+            category,
+            determine_transaction_type(item, category),
+        )
+        for item in matching_transactions
+    ]
+    updated_count = update_transaction_categories(user_id, transaction_updates)
+    if updated_count == 0:
         return {"status": "error", "message": "Transaction could not be updated."}
 
-    # Remember the user's choice for this UPI counterparty so future payments
-    # to the same person or merchant are categorized consistently.
     description = str(transaction.get("description") or "")
+    counterparty = None
     if "upi" in description.lower():
         counterparty = extract_counterparty(description).strip()
         if counterparty:
@@ -546,7 +559,10 @@ async def change_transaction_category(
     return {
         "status": "success",
         "category": category,
-        "transaction_type": transaction_type,
+        "transaction_type": determine_transaction_type(transaction, category),
+        "updated_count": updated_count,
+        "updated_transaction_ids": [item[0] for item in transaction_updates],
+        "counterparty": counterparty,
         "analysis": analyze_transactions(statement_transactions),
     }
 
