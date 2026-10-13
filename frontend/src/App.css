@@ -1190,6 +1190,39 @@ font-size: 11px;
 line-height: 1.6;
 }
 
+.spending-limiter-mode {
+display: inline-flex;
+width: fit-content;
+gap: 4px;
+padding: 4px;
+border: 1px solid #293a2e;
+border-radius: 10px;
+background: #0b120e;
+}
+
+.spending-limiter-mode button {
+min-height: 32px;
+padding: 0 12px;
+border: 1px solid transparent;
+border-radius: 7px;
+color: #829087;
+background: transparent;
+font: inherit;
+font-size: 10px;
+font-weight: 650;
+cursor: pointer;
+}
+
+.spending-limiter-mode button:hover {
+color: #e8f0e9;
+}
+
+.spending-limiter-mode button.active {
+border-color: rgba(91, 226, 157, 0.38);
+color: #a8e9c1;
+background: rgba(91, 226, 157, 0.11);
+}
+
 .limit-intensity-badge {
 flex: 0 0 auto;
 padding: 7px 10px;
@@ -1308,6 +1341,33 @@ display: block;
 height: 100%;
 border-radius: inherit;
 transition: width 220ms ease, background 220ms ease;
+}
+
+.limit-daily-guidance {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 12px;
+padding: 11px 13px;
+border: 1px solid #293a2e;
+border-radius: 9px;
+background: rgba(255, 255, 255, 0.025);
+}
+
+.limit-daily-guidance > div {
+display: grid;
+gap: 4px;
+}
+
+.limit-daily-guidance span,
+.limit-daily-guidance small {
+color: #829087;
+font-size: 10px;
+}
+
+.limit-daily-guidance strong {
+color: #a8e9c1;
+font-size: 14px;
 }
 
 .limit-low .limit-progress-track > span { background: #5be29d; }
@@ -3164,6 +3224,14 @@ flex-direction: column;
 flex-direction: column;
 }
 
+.spending-limiter-mode {
+width: 100%;
+}
+
+.spending-limiter-mode button {
+flex: 1;
+}
+
 .savings-limit-form {
 grid-template-columns: minmax(0, 1fr);
 }
@@ -3174,6 +3242,11 @@ width: 100%;
 
 .savings-limit-stats {
 grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.limit-daily-guidance {
+align-items: flex-start;
+flex-direction: column;
 }
 
 .analytics-totals {
@@ -3958,7 +4031,10 @@ background: #f3f7f4;
 :root[data-theme="light"] .analytics-placeholder p,
 :root[data-theme="light"] .savings-limit-heading p,
 :root[data-theme="light"] .savings-limit-form > label,
-:root[data-theme="light"] .limit-intensity-badge {
+:root[data-theme="light"] .limit-intensity-badge,
+:root[data-theme="light"] .limit-daily-guidance span,
+:root[data-theme="light"] .limit-daily-guidance small,
+:root[data-theme="light"] .spending-limiter-mode button {
 color: #5c7062;
 }
 
@@ -3997,6 +4073,9 @@ background: linear-gradient(145deg, #f4faf5, #eaf5ed);
 :root[data-theme="light"] .account-dropdown-name,
 :root[data-theme="light"] .savings-limit-heading h2,
 :root[data-theme="light"] .savings-limit-form > label > strong,
+:root[data-theme="light"] .limit-daily-guidance strong,
+:root[data-theme="light"] .savings-limit-stats strong,
+:root[data-theme="light"] .spending-limiter-mode button:hover,
 :root[data-theme="light"] .panel h2,
 :root[data-theme="light"] .category-transaction-name,
 :root[data-theme="light"] .category-summary-card > strong,
@@ -4047,6 +4126,22 @@ background: linear-gradient(145deg, #e9f7ec, #f5faf6);
 border-color: #dce8df;
 background: linear-gradient(145deg, #ffffff, #f9fbf9);
 box-shadow: 0 6px 18px rgba(26, 68, 42, 0.035);
+}
+
+:root[data-theme="light"] .limit-daily-guidance {
+border-color: #dce8df;
+background: #f6faf7;
+}
+
+:root[data-theme="light"] .spending-limiter-mode {
+border-color: #dce8df;
+background: #f2f7f3;
+}
+
+:root[data-theme="light"] .spending-limiter-mode button.active {
+border-color: #a8d8b6;
+color: #157342;
+background: #e2f3e7;
 }
 
 :root[data-theme="light"] .shared-bill-form,

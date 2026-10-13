@@ -23,6 +23,16 @@ expense totals and spending analysis. Repayments can be marked per participant;
 they reduce the amount owed and are automatically included in income only when
 marked as received.
 
+The spending limiter uses counted income plus the selected statement's opening
+balance, less counted personal expenses and the savings goal. UPI credits count
+only when selected as income; received shared-bill repayments count when marked
+received. UPI sends and outgoing transfers are kept out of the personal-spending
+progress, and shared expenses use only the account owner's share. Daily safe-to-
+spend guidance is shown only while the current date falls within the selected
+statement's transaction date range. Users can switch the limiter to **All
+transactions** to include gross bank credits and debits, including UPI and
+transfers.
+
 ## Project layout
 
 - `frontend/`: React and Vite static web application.

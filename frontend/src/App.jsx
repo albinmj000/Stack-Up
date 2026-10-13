@@ -26,6 +26,10 @@ import {
 import stackUpLogo from "./assets/stackup-logo.svg";
 import stackUpLightLogo from "./assets/stackup-logo-light.svg";
 import { API, readApiResponse } from "./api";
+import {
+  calculateSpendingLimiter,
+  sumAllBankTransactions,
+} from "./spendingLimiter";
 import AccountSettings from "./AccountSettings";
 import "./App.css";
 
@@ -436,6 +440,7 @@ function App() {
   });
   const [savingsGoalDraft, setSavingsGoalDraft] = useState("");
   const [savingsGoalError, setSavingsGoalError] = useState("");
+  const [spendingLimiterMode, setSpendingLimiterMode] = useState("income-expenses");
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -1332,37 +1337,39 @@ function App() {
     && firstDirection !== "unknown"
     ? firstBalance - (firstDirection === "credit" ? firstAmount : -firstAmount)
     : null;
-  const totalIncomingToAccount = displayTransactions.reduce((total, transaction) => {
-    const bankDirection = String(transaction.type ?? "").toLowerCase();
-    const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
-    const category = getAnalyticsCategory(transaction);
-    if (bankDirection === "credit") return total + getAmount(transaction);
-    if (bankDirection === "debit") return total;
-    if (transactionType === "income" || category === "UPI Received") {
-      return total + getAmount(transaction);
-    }
-    return total;
-  }, 0);
-  const totalFundsAvailable = Math.max(0, (openingBalance ?? 0) + totalIncomingToAccount);
-  const spendingLimit = Math.max(0, totalFundsAvailable - plannedSavings);
-  const totalOutgoingFromAccount = displayTransactions.reduce((total, transaction) => {
-    const bankDirection = String(transaction.type ?? "").toLowerCase();
-    const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
-    const category = getAnalyticsCategory(transaction);
-    if (bankDirection === "debit") return total + getAmount(transaction);
-    if (bankDirection === "credit") return total;
-    if (transactionType === "expense" || category === "UPI Sent") {
-      return total + getAmount(transaction);
-    }
-    return total;
-  }, 0);
-  const limitUsagePercent = spendingLimit > 0
-    ? (totalOutgoingFromAccount / spendingLimit) * 100
-    : totalOutgoingFromAccount > 0 ? 100 : 0;
+  const countedExpenses = Object.values(
+    displayAnalysis?.category_totals ?? {}
+  ).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
+  const allBankTransactionTotals = sumAllBankTransactions(displayTransactions);
+  const useAllTransactionsForLimiter = spendingLimiterMode === "all-transactions";
+  const limiterIncome = useAllTransactionsForLimiter
+    ? allBankTransactionTotals.income
+    : totalIncome;
+  const limiterExpenses = useAllTransactionsForLimiter
+    ? allBankTransactionTotals.expenses
+    : countedExpenses;
+  const statementDateKeys = displayTransactions
+    .map((transaction) => getTransactionDateKey(
+      transaction.date ?? transaction.transaction_date
+    ))
+    .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+    .sort();
+  const spendingLimiter = calculateSpendingLimiter({
+    income: limiterIncome,
+    openingBalance: openingBalance ?? 0,
+    expenses: limiterExpenses,
+    savingsGoal: plannedSavings,
+    periodStart: statementDateKeys[0],
+    periodEnd: statementDateKeys[statementDateKeys.length - 1],
+  });
+  const totalFundsAvailable = spendingLimiter.fundsAvailable;
+  const spendingLimit = spendingLimiter.spendingLimit;
+  const countedExpensesRupees = spendingLimiter.expenses;
+  const limitUsagePercent = spendingLimiter.usagePercent;
   const limitIntensity = limitUsagePercent < 50
     ? "low"
     : limitUsagePercent < 85 ? "medium" : "hard";
-  const remainingSpendingLimit = spendingLimit - totalOutgoingFromAccount;
+  const remainingSpendingLimit = spendingLimiter.remaining;
 
   function saveSavingsGoal(event) {
     event.preventDefault();
@@ -2091,16 +2098,43 @@ function App() {
                   <div>
                     <div className="eyebrow"><span className="live-dot" /> SPENDING LIMITER</div>
                     <h2>Set your savings target</h2>
-                    <p>Choose how much of this selected statement’s income you want to save. Stack Up calculates your spending limit.</p>
+                    <p>
+                      {useAllTransactionsForLimiter
+                        ? "Include every bank credit and debit, including UPI and transfers."
+                        : "Use recognized income and personal expenses; UPI sends and outgoing transfers stay separate."}
+                    </p>
                   </div>
                   <span className={`limit-intensity-badge ${hasSavingsGoal ? limitIntensity : "unset"}`}>
                     {hasSavingsGoal ? `${limitIntensity} intensity` : "Set a target"}
                   </span>
                 </div>
 
+                <div className="spending-limiter-mode" role="group" aria-label="Spending limiter calculation mode">
+                  <button
+                    type="button"
+                    className={useAllTransactionsForLimiter ? "" : "active"}
+                    aria-pressed={!useAllTransactionsForLimiter}
+                    onClick={() => setSpendingLimiterMode("income-expenses")}
+                  >
+                    Income &amp; expenses
+                  </button>
+                  <button
+                    type="button"
+                    className={useAllTransactionsForLimiter ? "active" : ""}
+                    aria-pressed={useAllTransactionsForLimiter}
+                    onClick={() => setSpendingLimiterMode("all-transactions")}
+                  >
+                    All transactions
+                  </button>
+                </div>
+
                 <form className="savings-limit-form" onSubmit={saveSavingsGoal}>
                   <label>
-                    <span>Opening balance + money received</span>
+                    <span>
+                      {useAllTransactionsForLimiter
+                        ? "All credits + opening balance"
+                        : "Income + opening balance"}
+                    </span>
                     <strong>{hasRealData ? money(totalFundsAvailable) : "Upload a statement first"}</strong>
                   </label>
                   <label className="savings-goal-input">
@@ -2133,10 +2167,20 @@ function App() {
                 {hasSavingsGoal && (
                   <div className="savings-limit-results">
                     <div className="savings-limit-stats">
-                      <div><span>Spending limit</span><strong>{money(spendingLimit)}</strong></div>
-                      <div><span>Spent or sent</span><strong>{money(totalOutgoingFromAccount)}</strong></div>
                       <div>
-                        <span>{remainingSpendingLimit >= 0 ? "Limit remaining" : "Over limit"}</span>
+                        <span>
+                          {useAllTransactionsForLimiter
+                            ? "All credits + opening balance − savings goal"
+                            : "Income + opening balance − savings goal"}
+                        </span>
+                        <strong>{money(spendingLimit)}</strong>
+                      </div>
+                      <div>
+                        <span>{useAllTransactionsForLimiter ? "All debits" : "Personal expenses counted"}</span>
+                        <strong>{money(countedExpensesRupees)}</strong>
+                      </div>
+                      <div>
+                        <span>{remainingSpendingLimit >= 0 ? "Safe to spend" : "Over limit"}</span>
                         <strong>{money(Math.abs(remainingSpendingLimit))}</strong>
                       </div>
                     </div>
@@ -2149,6 +2193,21 @@ function App() {
                       aria-valuenow={Math.min(100, Math.max(0, limitUsagePercent))}
                     >
                       <span style={{ width: `${Math.min(100, Math.max(0, limitUsagePercent))}%` }} />
+                    </div>
+                    <div className="limit-daily-guidance">
+                      <div>
+                        <span>Daily safe-to-spend</span>
+                        <strong>
+                          {spendingLimiter.dailySafeToSpend === null
+                            ? "—"
+                            : `${money(spendingLimiter.dailySafeToSpend)} / day`}
+                        </strong>
+                      </div>
+                      <small>
+                        {spendingLimiter.daysRemaining > 0
+                          ? `${spendingLimiter.daysRemaining} day${spendingLimiter.daysRemaining === 1 ? "" : "s"} left in this statement period`
+                          : "Daily guidance is available while today falls within the statement period"}
+                      </small>
                     </div>
                     <p className="limit-intensity-message">
                       <span className={`limit-traffic-light ${limitIntensity}`} aria-hidden="true" />
@@ -2163,9 +2222,19 @@ function App() {
                     </p>
                     <small>
                       {openingBalance === null
-                        ? "Opening balance could not be determined from this statement. "
-                        : `${money(openingBalance)} opening balance + `}
-                      {money(totalIncomingToAccount)} received (including UPI Received) − {money(plannedSavings)} planned savings = {money(spendingLimit)} available to spend.
+                        ? "Opening balance was unavailable and is treated as ₹0. "
+                        : null}
+                      {money(limiterIncome)} {useAllTransactionsForLimiter ? "bank credits" : "counted income"}
+                      {" + "}{money(openingBalance ?? 0)} opening balance
+                      {" − "}{money(countedExpensesRupees)} {useAllTransactionsForLimiter ? "bank debits" : "personal expenses"}
+                      {" − "}{money(plannedSavings)} savings goal ={" "}
+                      {remainingSpendingLimit >= 0
+                        ? `${money(remainingSpendingLimit)} safe to spend.`
+                        : `${money(Math.abs(remainingSpendingLimit))} over the spending limit.`}
+                      {" "}
+                      {useAllTransactionsForLimiter
+                        ? "This view includes UPI and transfers at their full bank amounts."
+                        : "UPI sent and outgoing transfers are excluded; shared expenses use your share."}
                     </small>
                   </div>
                 )}
