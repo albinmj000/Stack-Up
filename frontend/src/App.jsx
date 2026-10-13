@@ -739,6 +739,10 @@ function App() {
     setError("");
 
     try {
+      const history = messages
+        .slice(-12)
+        .filter((message) => ["user", "assistant"].includes(message.role))
+        .map(({ role, text: messageText }) => ({ role, text: messageText }));
       const params = new URLSearchParams({
         message: text,
       });
@@ -747,6 +751,8 @@ function App() {
       const response = await fetch(`${API}/message?${params.toString()}`, {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ history }),
       });
 
       const result = await readApiResponse(response);
@@ -2200,7 +2206,7 @@ function App() {
               <div className="chat-welcome">
                 <span className="chat-logo"><Sparkles size={24} /></span>
                 <h2>Meet your money assistant.</h2>
-                <p>Choose one or more statements. Answers will use only the selected statements.</p>
+                <p>Choose statements for questions about your finances. General questions do not use statement data.</p>
               </div>
 
               {statements.length > 0 && (
@@ -2320,7 +2326,7 @@ function App() {
               </form>
 
               <p className="demo-note">
-                Questions are sent to your Stack Up backend using your current workspace ID.
+                For AI answers, up to 12 recent chat turns may be sent to Groq. Chat history is not saved in Stack Up.
               </p>
             </section>
           )}

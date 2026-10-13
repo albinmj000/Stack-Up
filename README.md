@@ -52,6 +52,7 @@ Add these environment variables to the backend service:
 | `COOKIE_SECURE` | `true` |
 | `COOKIE_SAMESITE` | `none` |
 | `GROQ_API_KEY` | Secret API key for real AI categorization and assistant responses |
+| `TAVILY_API_KEY` | Optional backend-only key for retrieving current web sources in the AI Assistant |
 
 Configure the OTP delivery variables needed by your providers:
 
@@ -62,6 +63,22 @@ Configure the OTP delivery variables needed by your providers:
 Email OTPs use Resend's HTTPS API; the backend does not fall back to SMTP. SMS OTPs continue to use Twilio.
 
 WhatsApp integration is optional. If used, configure `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, and `WHATSAPP_APP_SECRET`.
+
+The AI Assistant can answer general questions without statement data. For current
+prices, specifications, offers, and similar facts, configure `TAVILY_API_KEY` on
+the backend. Tavily's basic search uses one API credit per search; check its
+account dashboard for current plan pricing. If search is not configured or a
+search request fails, the assistant says it could not verify current information
+instead of presenting an unverified result as current. Never expose this key in a
+frontend `VITE_` variable.
+
+Recent chat turns are sent with each assistant request to support follow-up
+questions. They are bounded to the latest 12 user/assistant messages and are not
+stored in the application database. When generating an AI answer, this context
+may be sent to Groq along with only relevant selected statement data. The
+assistant can calculate an EMI when the conversation supplies the purchase/loan
+amount, annual interest rate, and term; it will ask for missing inputs rather
+than assume them.
 
 Render supplies `PORT` at runtime; do not hardcode a production port. The `/health` route can be used as a health check.
 

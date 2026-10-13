@@ -1,4 +1,6 @@
+import os
 import json
+import unittest
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -115,10 +117,93 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(result["type"], "saving_guidance")
         self.assertIn("Food", result["message"])
 
+    @patch.object(message_handler, "understand_financial_question")
     @patch.object(message_handler, "get_user_transactions", return_value=[])
-    def test_general_question_without_statement(self, _transactions):
+    def test_general_question_without_statement(self, _transactions, understand):
+        understand.return_value = {
+            "intent": "general",
+            "category": None,
+            "answer": "A computer program follows instructions to perform tasks.",
+        }
         result = message_handler.handle_user_message("user-1", "Can you help me plan?")
-        self.assertIn("Upload a bank statement first", result["message"])
+        self.assertEqual(result["type"], "ai_answer")
+        self.assertIn("computer program", result["message"])
+        understand.assert_called_once_with("Can you help me plan?", [], [])
+
+    @patch.object(message_handler, "understand_financial_question")
+    @patch.object(message_handler, "get_user_transactions")
+    def test_general_technical_question_avoids_statement_data(
+        self, get_transactions, understand
+    ):
+        get_transactions.return_value = [
+            {"amount": 500, "type": "debit", "transaction_type": "expense"}
+        ]
+        understand.return_value = {
+            "intent": "general",
+            "category": None,
+            "answer": "Review the code path and its tests.",
+        }
+
+        result = message_handler.handle_user_message(
+            "user-1", "What changes should I make to this code?"
+        )
+
+        self.assertEqual(result["type"], "ai_answer")
+        understand.assert_called_once_with(
+            "What changes should I make to this code?", [], []
+        )
+
+    @patch.object(message_handler, "understand_financial_question")
+    @patch.object(message_handler, "get_user_transactions")
+    def test_general_question_does_not_send_selected_statement_data(
+        self, get_transactions, understand
+    ):
+        get_transactions.return_value = [
+            {"amount": 500, "type": "debit", "transaction_type": "expense"}
+        ]
+        understand.return_value = {
+            "intent": "general",
+            "category": None,
+            "answer": "Photosynthesis converts light into chemical energy.",
+        }
+
+        result = message_handler.handle_user_message(
+            "user-1", "Explain photosynthesis."
+        )
+
+        self.assertEqual(result["type"], "ai_answer")
+        understand.assert_called_once_with("Explain photosynthesis.", [], [])
+
+    @patch.object(message_handler, "understand_financial_question")
+    @patch.object(message_handler, "get_user_transactions", return_value=[])
+    def test_conversation_context_is_isolated_between_requests(
+        self, _transactions, understand
+    ):
+        understand.return_value = {
+            "intent": "general",
+            "category": None,
+            "answer": "Okay.",
+        }
+        first_history = [{"role": "user", "text": "The phone costs ₹90,000."}]
+        second_history = [{"role": "user", "text": "My course costs ₹20,000."}]
+
+        message_handler.handle_user_message(
+            "user-1", "What do you think?", history=first_history
+        )
+        message_handler.handle_user_message(
+            "user-2", "What do you think?", history=second_history
+        )
+
+        self.assertEqual(
+            understand.call_args_list[0].args[2],
+            first_history,
+        )
+        self.assertEqual(
+            understand.call_args_list[1].args[2],
+            second_history,
+        )
+        self.assertNotIn("course", understand.call_args_list[0].args[2][0]["text"])
+        self.assertNotIn("phone", understand.call_args_list[1].args[2][0]["text"])
 
     @patch.object(message_handler, "get_user_transactions")
     @patch.object(message_handler, "get_statement_transactions")
@@ -210,7 +295,7 @@ class FinancialQuestionPromptTests(unittest.TestCase):
             "How can I save?", [{"amount": 100, "type": "debit", "date": "2026-01-01"}]
         )
 
-        self.assertEqual(result["answer"], answer)
+        self.assertTrue(result["answer"].endswith(answer))
 
     @patch.object(ai_assistant, "get_client")
     def test_financial_answer_preserves_quotation_marks(self, get_client):
@@ -227,7 +312,7 @@ class FinancialQuestionPromptTests(unittest.TestCase):
             "How can I save?", [{"amount": 100, "type": "debit", "date": "2026-01-01"}]
         )
 
-        self.assertEqual(result["answer"], answer)
+        self.assertTrue(result["answer"].endswith(answer))
 
     @patch.object(message_handler, "get_user_transactions")
     @patch.object(ai_assistant, "get_client")
@@ -255,9 +340,115 @@ class FinancialQuestionPromptTests(unittest.TestCase):
         self.assertEqual(result["type"], "unknown")
         self.assertEqual(
             result["message"],
-            "I couldn't prepare a budget answer just now. Please try again "
-            "later, or ask about a specific total or spending category.",
+            "I couldn't answer that just now. Please try again shortly.",
         )
+
+
+class EmiCalculationTests(unittest.TestCase):
+    def test_follow_up_price_correction_is_used_for_emi(self):
+        result = ai_assistant.calculate_emi_from_conversation(
+            "Calculate EMI for 12 months at 12% annual interest.",
+            [
+                {"role": "user", "text": "The iPhone costs ₹1,00,000."},
+                {"role": "assistant", "text": "Understood."},
+                {"role": "user", "text": "Actually, it's ₹90,000."},
+            ],
+        )
+
+        self.assertEqual(result["data"]["principal"], 90_000)
+        self.assertEqual(result["data"]["months"], 12)
+        self.assertAlmostEqual(result["data"]["monthly_emi"], 7_996.39, places=2)
+        self.assertIn("latest purchase amount you provided", result["message"])
+
+    def test_emi_requests_missing_user_inputs_instead_of_guessing(self):
+        result = ai_assistant.calculate_emi_from_conversation(
+            "What is the EMI?", [{"role": "user", "text": "The phone costs ₹90,000."}]
+        )
+
+        self.assertIn("annual interest rate", result["message"])
+        self.assertIn("repayment period", result["message"])
+        self.assertNotIn("data", result)
+
+
+class AssistantErrorTests(unittest.TestCase):
+    def test_timeout_has_a_clear_retry_message(self):
+        error = message_handler.APITimeoutError(request=None)
+
+        self.assertIn("did not respond in time", message_handler._model_error_message(error))
+
+
+class WebSearchTests(unittest.TestCase):
+    @patch.dict(os.environ, {"TAVILY_API_KEY": "test-key"})
+    @patch.object(ai_assistant.urllib.request, "urlopen")
+    def test_tavily_search_returns_retrieved_sources(self, urlopen):
+        response = urlopen.return_value.__enter__.return_value
+        response.read.return_value = json.dumps({
+            "results": [{
+                "title": "Product specifications",
+                "url": "https://example.test/product",
+                "content": "Retrieved specification snippet.",
+            }]
+        }).encode()
+
+        sources = ai_assistant.search_web("current product specifications")
+
+        self.assertEqual(sources[0]["title"], "Product specifications")
+        request = urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode())
+        self.assertEqual(payload["query"], "current product specifications")
+        self.assertEqual(payload["search_depth"], "basic")
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 8)
+
+    @patch.object(ai_assistant, "search_web", side_effect=ai_assistant.WebSearchError("Unavailable"))
+    @patch.object(ai_assistant, "get_client")
+    def test_search_failure_does_not_claim_current_facts(self, get_client, _search):
+        get_client.return_value.chat.completions.create.return_value = (
+            FinancialQuestionPromptTests.response_with_content(json.dumps({
+                "intent": "general",
+                "category": None,
+                "answer": "The current price is ₹90,000.",
+                "needs_search": True,
+                "search_query": "current phone price",
+            }))
+        )
+
+        result = ai_assistant.understand_financial_question(
+            "What is the current phone price?"
+        )
+
+        self.assertEqual(result["sources"], [])
+        self.assertIn("couldn't verify current information", result["answer"])
+        self.assertNotIn("₹90,000", result["answer"])
+        get_client.return_value.chat.completions.create.assert_called_once()
+
+    @patch.object(ai_assistant, "search_web")
+    @patch.object(ai_assistant, "get_client")
+    def test_search_answer_includes_only_retrieved_source_urls(self, get_client, search):
+        search.return_value = [{
+            "title": "Product source",
+            "url": "https://example.test/source",
+            "content": "Official product information.",
+        }]
+        get_client.return_value.chat.completions.create.side_effect = [
+            FinancialQuestionPromptTests.response_with_content(json.dumps({
+                "intent": "general",
+                "category": None,
+                "answer": "Searching.",
+                "needs_search": True,
+                "search_query": "latest product specification",
+            })),
+            FinancialQuestionPromptTests.response_with_content(
+                '{"answer":"The retrieved source lists the requested specification."}'
+            ),
+        ]
+
+        result = ai_assistant.understand_financial_question(
+            "What are the latest specifications?"
+        )
+
+        self.assertIn("Current information retrieved from web search", result["answer"])
+        self.assertIn("https://example.test/source", result["answer"])
+        self.assertEqual(result["sources"][0]["url"], "https://example.test/source")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,13 @@
 import re
+import logging
 
+from groq import APIConnectionError, APITimeoutError, RateLimitError
 from services.correction_parser import process_correction_message
-from services.ai_assistant import understand_financial_question
+from services.ai_assistant import (
+    calculate_emi_from_conversation,
+    normalize_conversation_history,
+    understand_financial_question,
+)
 from database.database import get_statement_transactions, get_user_transactions
 from services.transaction_processor import rule_based_category
 
@@ -42,6 +48,8 @@ CATEGORY_ALIASES = {
     "loan / credit": "Loan / Credit",
 }
 
+logger = logging.getLogger(__name__)
+
 
 def detect_category(message):
     message_lower = message.lower()
@@ -63,9 +71,9 @@ def is_budget_planning_question(message):
             "realistically save",
             "save every month",
             "save each month",
+            "save monthly",
             "plan my budget",
             "budget without",
-            "what changes should i make",
         )
     )
     has_savings_context = any(
@@ -257,7 +265,67 @@ def format_saving_guidance(user_id, focus_category=None, transactions=None):
         "suggestions": suggestions,
         "follow_up_questions": follow_ups,
     }
-def handle_user_message(user_id, message, statement_id=None, statement_ids=None):
+
+
+def statement_data_is_relevant(message, history):
+    text = message.lower()
+    personal_finance_phrases = (
+        "my statement", "my transactions", "my spending", "my expenses",
+        "my income", "my savings rate", "how much can i save",
+        "how much money can i save", "realistically save", "save every month",
+        "save each month", "save monthly", "plan my budget", "budget without",
+        "save more money", "how can i save", "how do i save",
+        "based on the statement", "from these transactions", "from my statement",
+        "can i afford", "do i have enough money",
+    )
+    personal_finance_pattern = re.compile(
+        r"\bmy\b.{0,40}\b(?:spend|spending|expense|expenses|income|budget|"
+        r"saving|savings|statement|transaction|transactions|cash flow|balance|"
+        r"finance|financial)\b"
+        r"|\b(?:spend|spending|expense|expenses|income|budget|savings)\b"
+        r".{0,30}\b(?:my|me)\b"
+        r"|\bi\b.{0,30}\b(?:spend|spent|expenses|income|budget|savings)\b",
+        re.IGNORECASE,
+    )
+    if any(phrase in text for phrase in personal_finance_phrases) or personal_finance_pattern.search(text):
+        return True
+
+    follow_up = bool(re.search(r"\b(it|that|those|them|these|there|what about)\b", text))
+    if not follow_up:
+        return False
+    for turn in reversed(history[-6:]):
+        if turn["role"] == "user":
+            if (
+                any(phrase in turn["text"].lower() for phrase in personal_finance_phrases)
+                or personal_finance_pattern.search(turn["text"])
+            ):
+                return True
+    return False
+
+
+def _model_failure(message):
+    return {
+        "type": "unknown",
+        "message": message,
+    }
+
+
+def _model_error_message(error):
+    if isinstance(error, RateLimitError):
+        return "The AI service is busy right now. Please try again shortly."
+    if isinstance(error, (APITimeoutError, APIConnectionError)):
+        return "The AI service did not respond in time. Please try again shortly."
+    return "I couldn't answer that just now. Please try again shortly."
+
+
+def handle_user_message(
+    user_id,
+    message,
+    statement_id=None,
+    statement_ids=None,
+    history=None,
+):
+    history = normalize_conversation_history(history)
     message_lower = message.lower().strip()
 
     # 1. Corrections
@@ -286,30 +354,33 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
             for transaction in get_statement_transactions(user_id, selected_id)
         ]
 
+    emi_result = calculate_emi_from_conversation(message, history)
+    if emi_result is not None:
+        return emi_result
+
+    use_statement_data = statement_data_is_relevant(
+        message_lower,
+        history,
+    )
+    assistant_transactions = transactions if use_statement_data else []
+
     # Budget-planning questions need the AI to understand the whole request
     # before words like "income" or "expenses" can trigger category shortcuts.
     budget_planning_question = is_budget_planning_question(message_lower)
     if budget_planning_question:
-        if not transactions:
-            return {
-                "type": "query",
-                "message": "Upload a bank statement first, and I can help plan a budget from your transactions.",
-            }
         try:
-            understood = understand_financial_question(message, transactions)
+            understood = understand_financial_question(
+                message, assistant_transactions, history
+            )
             return {
                 "type": "ai_answer",
                 "message": understood["answer"],
             }
         except Exception as error:
-            print(f"Ask Stack Up response failed: {error}")
-            return {
-                "type": "unknown",
-                "message": (
-                    "I couldn't prepare a budget answer just now. Please try again "
-                    "later, or ask about a specific total or spending category."
-                ),
-            }
+            logger.warning(
+                "Ask Stack Up request failed (%s).", type(error).__name__
+            )
+            return _model_failure(_model_error_message(error))
 
     # 2. Transaction count
     count_phrases = [
@@ -617,14 +688,10 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
         }
 
     # 10. Natural-language questions not covered by exact calculations.
-    if not transactions:
-        return {
-            "type": "query",
-            "message": "Upload a bank statement first, and I can answer questions about your transactions.",
-        }
-
     try:
-        understood = understand_financial_question(message, transactions)
+        understood = understand_financial_question(
+            message, assistant_transactions, history
+        )
         intent = understood.get("intent", "general")
         requested_category = understood.get("category") or detect_category(message)
         if isinstance(requested_category, str):
@@ -639,7 +706,11 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
             "UPI Sent", "UPI Received",
         }
 
-        if intent == "list_category" and requested_category in valid_categories:
+        if (
+            assistant_transactions
+            and intent == "list_category"
+            and requested_category in valid_categories
+        ):
             matching = category_transactions(transactions, requested_category)
             matching.reverse()
             return {
@@ -653,7 +724,11 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
                 "transactions": matching,
             }
 
-        if intent == "category_total" and requested_category in valid_categories:
+        if (
+            assistant_transactions
+            and intent == "category_total"
+            and requested_category in valid_categories
+        ):
             total = category_total(transactions, requested_category)
             return {
                 "type": "query",
@@ -661,7 +736,7 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
                 "data": {"category": requested_category, "amount": total},
             }
 
-        if intent == "summary":
+        if assistant_transactions and intent == "summary":
             summary_lines, spending = format_statement_summary(user_id, transactions)
             return {
                 "type": "query",
@@ -674,11 +749,7 @@ def handle_user_message(user_id, message, statement_id=None, statement_ids=None)
             "message": understood["answer"],
         }
     except Exception as error:
-        print(f"Ask Stack Up response failed: {error}")
-        return {
-            "type": "unknown",
-            "message": (
-                "I couldn't answer that just now. Try asking about your spending, "
-                "a merchant, or a category, and check that the AI service is available."
-            ),
-        }
+        logger.warning(
+            "Ask Stack Up request failed (%s).", type(error).__name__
+        )
+        return _model_failure(_model_error_message(error))

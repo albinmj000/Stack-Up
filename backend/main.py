@@ -489,13 +489,20 @@ async def receive_message(
     message: str,
     statement_id: int | None = None,
     statement_ids: list[int] | None = Query(default=None),
+    payload: dict | None = Body(default=None),
 ):
     user_id = authenticated_account(request)["user_id"]
     selected_ids = list(dict.fromkeys(statement_ids or ([] if statement_id is None else [statement_id])))
     for selected_id in selected_ids:
         if get_statement(user_id, selected_id) is None:
             raise HTTPException(status_code=404, detail="Statement not found for this account.")
-    return handle_user_message(user_id, message, statement_ids=selected_ids or None)
+    history = payload.get("history") if isinstance(payload, dict) else None
+    return handle_user_message(
+        user_id,
+        message,
+        statement_ids=selected_ids or None,
+        history=history,
+    )
 
 
 @app.patch("/transactions/{transaction_id}/category")
