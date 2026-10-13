@@ -713,6 +713,29 @@ gap: 18px;
 margin-bottom: 28px;
 }
 
+.welcome-actions {
+display: flex;
+align-items: flex-end;
+gap: 12px;
+}
+
+.dashboard-scope-control {
+display: grid;
+gap: 6px;
+color: #8a998f;
+font-size: 10px;
+}
+
+.dashboard-scope-control select {
+min-height: 42px;
+padding: 0 12px;
+border: 1px solid #293b2f;
+border-radius: 9px;
+color: #e8eee9;
+background: #101812;
+font-size: 11px;
+}
+
 .eyebrow {
 display: flex;
 align-items: center;
@@ -2823,6 +2846,11 @@ grid-template-columns: repeat(2, minmax(0, 1fr));
 align-items: flex-start;
 flex-direction: column;
 gap: 18px;
+}
+
+.welcome-actions {
+width: 100%;
+flex-wrap: wrap;
 }
 
 h1 {

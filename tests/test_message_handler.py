@@ -111,6 +111,31 @@ class OverlappingStatementDeduplicationTests(unittest.TestCase):
 
         self.assertEqual([item["id"] for item in result], [1, 2])
 
+    def test_preserves_maximum_repeat_count_across_overlapping_statements(self):
+        def transaction(transaction_id, statement_id):
+            return {
+                "id": transaction_id,
+                "statement_id": statement_id,
+                "date": "18-09-2026",
+                "description": "Cafe Central",
+                "amount": 80,
+                "type": "debit",
+            }
+
+        transactions = [
+            transaction(1, 10),
+            transaction(2, 10),
+            transaction(3, 11),
+            transaction(4, 11),
+            transaction(5, 11),
+        ]
+
+        result = message_handler.deduplicate_overlapping_statement_transactions(
+            transactions
+        )
+
+        self.assertEqual([item["id"] for item in result], [1, 2, 5])
+
     def test_selected_statement_combination_uses_deduplicated_rows(self):
         statement_a = [
             {

@@ -179,7 +179,7 @@ def _transaction_overlap_keys(transaction):
 
 def deduplicate_overlapping_statement_transactions(transactions):
     """Drop matching rows only when they came from different statements."""
-    seen_by_key = {}
+    occurrences_by_key_and_statement = {}
     deduplicated = []
     for transaction in transactions:
         statement_id = transaction.get("statement_id")
@@ -188,17 +188,21 @@ def deduplicate_overlapping_statement_transactions(transactions):
             continue
 
         keys = _transaction_overlap_keys(transaction)
-        previous_statements = {
-            prior_statement
-            for key in keys
-            for prior_statement in seen_by_key.get(key, set())
-        }
-        if any(prior_statement != statement_id for prior_statement in previous_statements):
-            continue
-
-        deduplicated.append(transaction)
+        duplicate_in_another_statement = False
         for key in keys:
-            seen_by_key.setdefault(key, set()).add(statement_id)
+            statement_occurrences = occurrences_by_key_and_statement.setdefault(
+                key, {}
+            )
+            occurrence_number = statement_occurrences.get(statement_id, 0) + 1
+            statement_occurrences[statement_id] = occurrence_number
+            if any(
+                other_statement != statement_id
+                and count >= occurrence_number
+                for other_statement, count in statement_occurrences.items()
+            ):
+                duplicate_in_another_statement = True
+        if not duplicate_in_another_statement:
+            deduplicated.append(transaction)
     return deduplicated
 
 

@@ -369,6 +369,11 @@ function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [combinedData, setCombinedData] = useState(null);
+  const [combinedLoading, setCombinedLoading] = useState(false);
+  const [combinedError, setCombinedError] = useState("");
+  const [combinedRefreshKey, setCombinedRefreshKey] = useState(0);
+  const [dashboardScope, setDashboardScope] = useState("all");
   const [statements, setStatements] = useState([]);
   const [activeStatementId, setActiveStatementId] = useState(null);
   const [aiStatementIds, setAiStatementIds] = useState([]);
@@ -409,6 +414,53 @@ function App() {
   const savingsAccountKey = String(
     account?.user_id ?? account?.id ?? account?.username ?? account?.email ?? account?.phone ?? ""
   );
+  const statementIdsKey = statements
+    .map((statement) => statement.statement_id)
+    .join(",");
+
+  useEffect(() => {
+    if (!account || !statements.length) {
+      setCombinedData(null);
+      setCombinedError("");
+      setCombinedLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    async function loadCombinedStatements() {
+      setCombinedLoading(true);
+      setCombinedError("");
+      setCombinedData(null);
+      try {
+        const response = await fetch(`${API}/statements/combined`, {
+          credentials: "include",
+        });
+        const result = await readApiResponse(response);
+        if (!response.ok) {
+          throw new Error(result.detail || "Could not load combined statements.");
+        }
+        if (!cancelled) {
+          setCombinedData({
+            transactions: Array.isArray(result.transactions) ? result.transactions : [],
+            analysis: result.analysis ?? null,
+            statementCount: Number(result.statement_count) || 0,
+          });
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setCombinedError(loadError.message);
+          setCombinedData(null);
+        }
+      } finally {
+        if (!cancelled) setCombinedLoading(false);
+      }
+    }
+
+    loadCombinedStatements();
+    return () => {
+      cancelled = true;
+    };
+  }, [account, statementIdsKey, statements.length, combinedRefreshKey]);
 
   useEffect(() => {
     if (savingsAccountKey) {
@@ -663,6 +715,7 @@ function App() {
           : item
       ));
       setAnalysis(result.analysis);
+      setCombinedRefreshKey((current) => current + 1);
       setNotice(
         result.updated_count > 1
           ? `Category saved as ${category} for ${result.updated_count} transactions to ${result.counterparty}.`
@@ -847,13 +900,20 @@ function App() {
     askQuestion(question.trim());
   }
 
-  const totalIncome = Number(analysis?.total_income ?? 0);
-  const totalExpenses = Number(analysis?.total_expenses ?? 0);
+  const useCombinedScope = dashboardScope === "all" && statements.length > 1;
+  const displayTransactions = useCombinedScope
+    ? combinedData?.transactions ?? []
+    : transactions;
+  const displayAnalysis = useCombinedScope
+    ? combinedData?.analysis ?? null
+    : analysis;
+  const totalIncome = Number(displayAnalysis?.total_income ?? 0);
+  const totalExpenses = Number(displayAnalysis?.total_expenses ?? 0);
   const netCashFlow = Number(
-    analysis?.net_cash_flow ?? totalIncome - totalExpenses
+    displayAnalysis?.net_cash_flow ?? totalIncome - totalExpenses
   );
   const savingsRate = Number(
-    analysis?.savings_rate ??
+    displayAnalysis?.savings_rate ??
       (totalIncome > 0 ? (netCashFlow / totalIncome) * 100 : 0)
   );
   const plannedSavings = Number(savingsGoals[savingsAccountKey] || 0);
@@ -926,16 +986,24 @@ function App() {
     setSavingsGoalError("");
   }
 
-  const hasRealData = Boolean(analysis);
-  const recentTransactions = transactions.slice(-5).reverse();
+  const hasRealData = Boolean(displayAnalysis);
+  const recentTransactions = [...displayTransactions]
+    .sort((a, b) => {
+      const dateA = getTransactionDateKey(a.date ?? a.transaction_date);
+      const dateB = getTransactionDateKey(b.date ?? b.transaction_date);
+      if (dateA === "Unknown date") return 1;
+      if (dateB === "Unknown date") return -1;
+      return dateB.localeCompare(dateA);
+    })
+    .slice(0, 5);
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
   const transactionCategoryOptions = [...new Set(
-    transactions.map(getTransactionCategory)
+    displayTransactions.map(getTransactionCategory)
   )].sort((a, b) => a.localeCompare(b));
   const transactionFiltersActive = Object.values(transactionFilters).some(
     (value) => value !== "" && value !== "all"
   );
-  const filteredTransactions = transactions.filter((transaction) => {
+  const filteredTransactions = displayTransactions.filter((transaction) => {
     const category = getTransactionCategory(transaction);
     const type = getTransactionFilterType(transaction);
     const date = getTransactionDateKey(transaction.date ?? transaction.transaction_date);
@@ -973,7 +1041,7 @@ function App() {
   });
 
   const timelineByDate = new Map();
-  transactions.forEach((transaction) => {
+  displayTransactions.forEach((transaction) => {
     const dateKey = getTransactionDateKey(
       transaction.date ?? transaction.transaction_date
     );
@@ -1000,7 +1068,7 @@ function App() {
   );
   const timelineIncome = transactionTimeline.reduce((sum, day) => sum + day.income, 0);
   const timelineExpenses = transactionTimeline.reduce((sum, day) => sum + day.expenses, 0);
-  const dateSortedTransactions = [...transactions].sort((a, b) => {
+  const dateSortedTransactions = [...displayTransactions].sort((a, b) => {
     const dateA = getTransactionDateKey(a.date ?? a.transaction_date);
     const dateB = getTransactionDateKey(b.date ?? b.transaction_date);
     if (dateA === "Unknown date") return 1;
@@ -1011,12 +1079,12 @@ function App() {
     (day) => day.dateKey === selectedTimelineDate
   );
   const selectedDateTransactions = selectedTimelineDay
-    ? transactions.filter((transaction) =>
+    ? displayTransactions.filter((transaction) =>
         getTransactionDateKey(transaction.date ?? transaction.transaction_date) === selectedTimelineDate
       )
     : [];
 
-  const spendingEntries = Object.entries(analysis?.category_totals ?? {})
+  const spendingEntries = Object.entries(displayAnalysis?.category_totals ?? {})
     .filter(([category]) => !/income|salary|credit|deposit/i.test(category))
     .map(([label, amount]) => ({
       label,
@@ -1025,7 +1093,7 @@ function App() {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
 
-  const categoryOverview = transactions.reduce((categories, transaction) => {
+  const categoryOverview = displayTransactions.reduce((categories, transaction) => {
     const label = getAnalyticsCategory(transaction);
     const category = categories.get(label) ?? { label, amount: 0, count: 0 };
     category.amount += getAmount(transaction);
@@ -1045,17 +1113,17 @@ function App() {
   const allCategoryTotal = allCategoryEntries.reduce((sum, item) => sum + item.amount, 0);
 
   const selectedCategoryTransactions = selectedCategory
-    ? transactions.filter((transaction) =>
+    ? displayTransactions.filter((transaction) =>
         getAnalyticsCategory(transaction) === selectedCategory
       )
     : [];
 
-  const incomeTransactions = transactions.filter(
+  const incomeTransactions = displayTransactions.filter(
     (transaction) =>
       getAnalyticsCategory(transaction) === "UPI Received" ||
       String(transaction.transaction_type ?? "").toLowerCase() === "income"
   );
-  const expenseTransactions = transactions.filter(
+  const expenseTransactions = displayTransactions.filter(
     (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "expense"
   );
   const selectedMetricTransactions = selectedMetric === "total_income"
@@ -1299,22 +1367,53 @@ function App() {
                   <h1>Your money, <span>in focus.</span></h1>
                   <p className="page-subtitle">
                     {hasRealData
-                      ? "Your uploaded statement analysis."
+                      ? useCombinedScope
+                        ? `Combined view of ${combinedData?.statementCount ?? statements.length} uploaded statements. Overlapping transactions are counted once.`
+                        : "Your uploaded statement analysis."
                       : "Upload a bank statement to see your financial overview."}
                   </p>
+                  {useCombinedScope && (
+                    <p className="demo-note">
+                      Transfers between your own accounts may need category review if
+                      the statements do not identify them as transfers.
+                    </p>
+                  )}
                 </div>
 
-                <label className={`upload-button ${uploading ? "uploading" : ""}`}>
-                  <Upload size={17} />
-                  {uploading ? "Analyzing..." : "Upload statement"}
-                  <input
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    disabled={uploading}
-                    onChange={uploadStatement}
-                  />
-                </label>
+                <div className="welcome-actions">
+                  {statements.length > 1 && (
+                    <label className="dashboard-scope-control">
+                      <span>Dashboard view</span>
+                      <select
+                        value={dashboardScope}
+                        onChange={(event) => setDashboardScope(event.target.value)}
+                      >
+                        <option value="all">All statements combined</option>
+                        <option value="current">Selected statement only</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className={`upload-button ${uploading ? "uploading" : ""}`}>
+                    <Upload size={17} />
+                    {uploading ? "Analyzing..." : "Upload statement"}
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      disabled={uploading}
+                      onChange={uploadStatement}
+                    />
+                  </label>
+                </div>
               </section>
+
+              {useCombinedScope && combinedLoading && (
+                <div className="notice-message" role="status">Combining your uploaded statements...</div>
+              )}
+              {useCombinedScope && combinedError && (
+                <div className="error-message" role="alert">
+                  Could not load the combined overview: {combinedError}
+                </div>
+              )}
 
               <section className="stat-grid">
                 <button className="stat-card balance-card metric-card" onClick={() => openMetric("net_cash_flow")}>
@@ -1326,7 +1425,11 @@ function App() {
                     {hasRealData ? money(netCashFlow) : "—"}
                   </div>
                   <div className="stat-foot">
-                    <span>{hasRealData ? "From statement" : "Upload a statement"}</span>
+                    <span>
+                      {hasRealData
+                        ? useCombinedScope ? "Across statements" : "From statement"
+                        : "Upload a statement"}
+                    </span>
                   </div>
                   <div className="balance-decoration">
                     <i /><i /><i /><i /><i /><i /><i />
@@ -1382,6 +1485,16 @@ function App() {
                 </button>
               </section>
 
+              {useCombinedScope ? (
+                <section className="panel savings-limit-panel">
+                  <h2>Spending limit</h2>
+                  <p>
+                    Choose one statement to set a spending limit. Opening balances
+                    from multiple statements can overlap or belong to different
+                    accounts, so they are not combined here.
+                  </p>
+                </section>
+              ) : (
               <section className={`panel savings-limit-panel limit-${limitIntensity}`}>
                 <div className="savings-limit-heading">
                   <div>
@@ -1466,6 +1579,7 @@ function App() {
                   </div>
                 )}
               </section>
+              )}
 
               <section className="content-grid">
                 <article className="panel cashflow-panel">
@@ -1480,7 +1594,7 @@ function App() {
                     <div className="statement-summary">
                       <div>
                         <span>Transactions analyzed</span>
-                        <strong>{transactions.length}</strong>
+                        <strong>{displayTransactions.length}</strong>
                       </div>
                       <div>
                         <span>Net cash flow</span>
@@ -1631,17 +1745,19 @@ function App() {
                 <div>
                   <div className="eyebrow"><span className="live-dot" /> TRANSACTION TIMELINE</div>
                   <h1>Your money, <span>over time.</span></h1>
-                  <p className="page-subtitle">Daily income and spending across every transaction in your statement.</p>
+                  <p className="page-subtitle">
+                    Daily income and spending across {useCombinedScope ? "all uploaded statements" : "the selected statement"}.
+                  </p>
                 </div>
                 <button className="secondary-button" onClick={() => setActivePage("Dashboard")}>
                   <LayoutDashboard size={16} /> Back to dashboard
                 </button>
               </section>
 
-              {transactions.length > 0 ? (
+              {displayTransactions.length > 0 ? (
                 <>
                   <section className="analytics-totals trends-totals">
-                    <article><span>Transactions</span><strong>{transactions.length}</strong></article>
+                    <article><span>Transactions</span><strong>{displayTransactions.length}</strong></article>
                     <article><span>Total credits</span><strong className="trend-income-text">{money(timelineIncome)}</strong></article>
                     <article><span>Total debits</span><strong className="trend-expense-text">{money(timelineExpenses)}</strong></article>
                   </section>
@@ -1739,7 +1855,7 @@ function App() {
                     <div className="panel-heading">
                       <div>
                         <h2>All transactions by date</h2>
-                        <p>{transactions.length} transactions, newest date first.</p>
+                        <p>{displayTransactions.length} transactions, newest date first.</p>
                       </div>
                     </div>
                     <div className="transaction-table-wrap">
@@ -1779,7 +1895,10 @@ function App() {
               <div className="panel-heading">
                 <div>
                   <h2>Transactions</h2>
-                  <p>{filteredTransactions.length} of {transactions.length} transactions shown. Changing a UPI category updates matching transactions and is remembered for future payments.</p>
+                  <p>
+                    {filteredTransactions.length} of {displayTransactions.length} transactions shown
+                    {useCombinedScope ? " across all uploaded statements" : ""}. Changing a UPI category updates matching transactions and is remembered for future payments.
+                  </p>
                 </div>
                 <label className="upload-button">
                   <Upload size={17} /> Upload statement
@@ -1787,7 +1906,7 @@ function App() {
                 </label>
               </div>
 
-              {transactions.length > 0 && (
+              {displayTransactions.length > 0 && (
                 <div className="metric-filter-grid transaction-filter-grid" aria-label="Filter transactions">
                   <label>
                     <span>Category</span>
@@ -1887,7 +2006,7 @@ function App() {
                     </tbody>
                   </table>
                 </div>
-              ) : transactions.length > 0 ? (
+              ) : displayTransactions.length > 0 ? (
                 <div className="empty-state">
                   <p>No transactions match these filters or your search.</p>
                   <button className="text-button" onClick={() => {

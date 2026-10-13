@@ -25,7 +25,10 @@ from services.statement_parser import (
 )
 from services.transaction_processor import categorize_transactions
 from services.analyzer import analyze_transactions
-from services.message_handler import handle_user_message
+from services.message_handler import (
+    deduplicate_overlapping_statement_transactions,
+    handle_user_message,
+)
 from services.statement_service import check_duplicate_statement
 from database.database import (
     initialize_database,
@@ -575,6 +578,19 @@ async def change_transaction_category(
 async def statements_history(request: Request):
     user_id = authenticated_account(request)["user_id"]
     return {"statements": list_user_statements(user_id)}
+
+
+@app.get("/statements/combined")
+async def combined_statements(request: Request):
+    user_id = authenticated_account(request)["user_id"]
+    transactions = deduplicate_overlapping_statement_transactions(
+        get_user_transactions(user_id)
+    )
+    return {
+        "statement_count": len(list_user_statements(user_id)),
+        "transactions": transactions,
+        "analysis": analyze_transactions(transactions),
+    }
 
 
 @app.get("/statements/{statement_id}/pdf")

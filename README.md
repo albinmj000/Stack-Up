@@ -1,6 +1,6 @@
 # Stack Up
 
-Stack Up is a personal finance application for uploading Indian bank statement PDFs, reviewing categorized transactions, exploring cash flow and spending analytics, and asking an AI assistant questions about saved transactions. User accounts, statement history, parsed transactions, and original uploaded PDFs are private to each account.
+Stack Up is a personal finance application for uploading Indian bank statement PDFs, reviewing categorized transactions, exploring cash flow and spending analytics, and asking an AI assistant questions about saved transactions. The dashboard can combine transactions across uploaded statements, deduplicating overlapping rows for combined totals while preserving the original statement records. User accounts, statement history, parsed transactions, and original uploaded PDFs are private to each account.
 
 ## Project layout
 
