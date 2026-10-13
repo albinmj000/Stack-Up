@@ -5,7 +5,11 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from groq import APIConnectionError, APITimeoutError, RateLimitError
-from services.analyzer import get_expense_amount, get_upi_activity
+from services.analyzer import (
+    get_expense_amount,
+    get_shared_bill_repaid_amount,
+    get_upi_activity,
+)
 from services.correction_parser import process_correction_message
 from services.ai_assistant import (
     calculate_emi_from_conversation,
@@ -110,6 +114,7 @@ def transaction_totals(transactions):
     }
     for transaction in transactions:
         amount = abs(float(transaction.get("amount") or 0))
+        totals["total_income"] += get_shared_bill_repaid_amount(transaction)
         transaction_type = str(
             transaction.get("transaction_type") or "unknown"
         ).lower()
@@ -232,6 +237,9 @@ def deduplicate_overlapping_statement_transactions(transactions):
                         ]
                         existing["shared_bill_id"] = transaction.get(
                             "shared_bill_id"
+                        )
+                        existing["shared_bill_repaid_amount"] = (
+                            get_shared_bill_repaid_amount(transaction)
                         )
                     break
         else:

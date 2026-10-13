@@ -2,7 +2,11 @@ from database.database import (
     get_user_transactions,
     get_statement_transactions
 )
-from services.analyzer import get_expense_amount, get_upi_activity
+from services.analyzer import (
+    get_expense_amount,
+    get_shared_bill_repaid_amount,
+    get_upi_activity,
+)
 from services.transaction_processor import rule_based_category
 
 
@@ -60,6 +64,7 @@ def get_transaction_totals(user_id):
 
     for transaction in transactions:
 
+        total_income += get_shared_bill_repaid_amount(transaction)
         amount = (
             get_expense_amount(transaction)
             if str(transaction.get("transaction_type") or "").lower() == "expense"
@@ -152,6 +157,7 @@ def get_statement_totals(
 
     for transaction in transactions:
 
+        total_income += get_shared_bill_repaid_amount(transaction)
         amount = (
             get_expense_amount(transaction)
             if str(transaction.get("transaction_type") or "").lower() == "expense"

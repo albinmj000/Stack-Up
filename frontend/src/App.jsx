@@ -1049,6 +1049,7 @@ function App() {
         throw new Error(result.detail || "Could not update repayment status.");
       }
       setSharedBills(result.shared_bills ?? []);
+      setCombinedRefreshKey((current) => current + 1);
       setNotice(isPaid ? "Repayment marked as received." : "Repayment marked as outstanding.");
     } catch (repaymentError) {
       setError(repaymentError.message);
@@ -1290,7 +1291,9 @@ function App() {
   );
   const visibleSharedBills = sharedBills.filter((bill) =>
     displayTransactions.some(
-      (transaction) => Number(transaction.id) === Number(bill.transaction_id)
+      (transaction) =>
+        Number(transaction.id) === Number(bill.transaction_id) ||
+        Number(transaction.shared_bill_id) === Number(bill.id)
     )
   );
   const displayAnalysis = useCombinedScope
@@ -1534,6 +1537,24 @@ function App() {
       isUpiActivity(transaction, "received") &&
       String(transaction.type ?? "").toLowerCase() === "credit"
   );
+  const sharedBillRepaymentIncomeTransactions = visibleSharedBills.flatMap((bill) =>
+    (bill.participants ?? [])
+      .filter((participant) => Boolean(participant.is_paid))
+      .map((participant) => ({
+        id: `shared-bill-repayment-${bill.id}-${participant.id}`,
+        type: "credit",
+        transaction_type: "income",
+        category: "Shared bill repayment",
+        description: `Repayment marked received from ${participant.name} · ${bill.title}`,
+        amount: participant.share_amount,
+        date: null,
+        is_shared_bill_repayment: true,
+      }))
+  );
+  const selectedIncomeTransactions = [
+    ...incomeTransactions,
+    ...sharedBillRepaymentIncomeTransactions,
+  ];
   const expenseTransactions = displayTransactions.filter(
     (transaction) =>
       !isUpiActivity(transaction, "received") &&
@@ -1547,7 +1568,7 @@ function App() {
       )
   );
   const selectedMetricTransactions = selectedMetric === "total_income"
-    ? incomeTransactions
+    ? selectedIncomeTransactions
     : selectedMetric === "total_expenses"
       ? expenseTransactions
       : [...incomeTransactions, ...expenseTransactions].sort(
@@ -1583,13 +1604,13 @@ function App() {
       title: "Net cash flow",
       value: money(netCashFlow),
       formula: `${money(totalIncome)} total income - ${money(totalExpenses)} total expenses = ${money(netCashFlow)}`,
-      explanation: `Calculated from ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expenses/outgoing non-UPI transfers. UPI activity and unknown transactions are excluded.`,
+      explanation: `Calculated from ${selectedIncomeTransactions.length} income items and ${expenseTransactions.length} expenses/outgoing non-UPI transfers. UPI activity and unknown transactions are excluded.`,
     },
     total_income: {
       title: "Total income",
       value: money(totalIncome),
-      formula: `Sum of ${incomeTransactions.length} income transactions, including any UPI credits you selected = ${money(totalIncome)}`,
-      explanation: "UPI Received credits are separate by default. Use the checkboxes below to include selected credits in income.",
+      formula: `Sum of ${selectedIncomeTransactions.length} income items, including UPI credits you selected and shared-bill repayments marked received = ${money(totalIncome)}`,
+      explanation: "UPI Received credits count only when selected. Shared-bill participant shares count as income when you mark them as received.",
     },
     total_expenses: {
       title: "Total expenses",
@@ -1998,7 +2019,7 @@ function App() {
                     {hasRealData ? money(totalIncome) : "—"}
                   </div>
                   <div className="stat-foot">
-                    <span>{hasRealData ? "Income credits + selected UPI" : "Awaiting data"}</span>
+                    <span>{hasRealData ? "Income credits + selected UPI + received repayments" : "Awaiting data"}</span>
                   </div>
                   <div className="mini-bars income-bars">
                     <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
@@ -2940,7 +2961,9 @@ function App() {
                   <small>{metricDetail.explanation}</small>
                 </section>
 
-                {selectedMetric === "total_income" && upiReceivedTransactions.length > 0 && (
+                {selectedMetric === "total_income" && (
+                  <>
+                {upiReceivedTransactions.length > 0 && (
                   <section className="panel income-choice-panel">
                     <div className="panel-heading">
                       <div>
@@ -2988,6 +3011,38 @@ function App() {
                       </table>
                     </div>
                   </section>
+                )}
+                {sharedBillRepaymentIncomeTransactions.length > 0 && (
+                  <section className="panel income-choice-panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>Shared-bill repayments counted as income</h2>
+                        <p>These participant shares are included because you marked them as received in Shared bills.</p>
+                      </div>
+                    </div>
+                    <div className="transaction-table-wrap">
+                      <table className="metric-transactions-table">
+                        <thead>
+                          <tr>
+                            <th>REPAYMENT</th>
+                            <th>STATUS</th>
+                            <th className="amount-column">AMOUNT</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sharedBillRepaymentIncomeTransactions.map((transaction) => (
+                            <tr key={transaction.id}>
+                              <td><strong className="category-transaction-name">{transaction.description}</strong></td>
+                              <td>Received</td>
+                              <td className="amount-cell income">{money(transaction.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+                  </>
                 )}
 
                 <section className="panel transactions-panel metric-transactions-panel">

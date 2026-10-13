@@ -122,12 +122,27 @@ class DatabaseTests(unittest.TestCase):
         self.assertTrue(database.set_shared_bill_participant_paid(
             "user-a", bill_id, bill["participants"][0]["id"], True
         ))
+        self.assertEqual(
+            database.get_statement_transactions("user-a", statement_id)[0][
+                "shared_bill_repaid_amount"
+            ],
+            5000,
+        )
         self.assertFalse(database.set_shared_bill_participant_paid(
             "user-b", bill_id, bill["participants"][1]["id"], True
         ))
         updated_bill = database.list_user_shared_bills("user-a")[0]
         self.assertEqual(updated_bill["repaid_amount"], 5000)
         self.assertEqual(updated_bill["amount_owed"], 2500)
+        self.assertTrue(database.set_shared_bill_participant_paid(
+            "user-a", bill_id, bill["participants"][0]["id"], False
+        ))
+        self.assertEqual(
+            database.get_statement_transactions("user-a", statement_id)[0][
+                "shared_bill_repaid_amount"
+            ],
+            0,
+        )
 
         saved_transaction = database.get_statement_transactions(
             "user-a", statement_id

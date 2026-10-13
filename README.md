@@ -20,7 +20,8 @@ Shared bills can be linked to eligible debit expense transactions and split
 between the account owner and other people using equal or custom shares. The
 original bank payment remains visible, while the owner's share is used for
 expense totals and spending analysis. Repayments can be marked per participant;
-they reduce the amount owed and are not counted as income.
+they reduce the amount owed and are automatically included in income only when
+marked as received.
 
 ## Project layout
 

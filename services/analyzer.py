@@ -31,6 +31,13 @@ def get_expense_amount(transaction):
         return 0.0
 
 
+def get_shared_bill_repaid_amount(transaction):
+    try:
+        return max(0.0, float(transaction.get("shared_bill_repaid_amount") or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def analyze_transactions(transactions):
     total_income = 0.0
     total_expenses = 0.0
@@ -48,6 +55,8 @@ def analyze_transactions(transactions):
             amount = abs(float(transaction.get("amount") or 0))
         except (TypeError, ValueError):
             continue
+
+        total_income += get_shared_bill_repaid_amount(transaction)
 
         transaction_type = str(
             transaction.get("transaction_type", "unknown")

@@ -67,6 +67,21 @@ class TransactionTotalTests(unittest.TestCase):
         self.assertEqual(totals["total_expenses"], 7500)
         self.assertEqual(spending["Bills & Utilities"], 7500)
 
+    def test_received_shared_bill_repayments_count_as_assistant_income(self):
+        totals = message_handler.transaction_totals([
+            {
+                "amount": 15000,
+                "type": "debit",
+                "category": "Bills & Utilities",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_repaid_amount": 5000,
+            },
+        ])
+
+        self.assertEqual(totals["total_income"], 5000)
+        self.assertEqual(totals["total_expenses"], 7500)
+
 
 class OverlappingStatementDeduplicationTests(unittest.TestCase):
     def test_shared_bill_owner_share_is_preserved_when_overlapping_rows_deduplicate(self):
@@ -94,6 +109,7 @@ class OverlappingStatementDeduplicationTests(unittest.TestCase):
                 "category": "Bills & Utilities",
                 "shared_bill_owner_share": 7500,
                 "shared_bill_id": 4,
+                "shared_bill_repaid_amount": 5000,
             },
         ]
 
@@ -104,6 +120,7 @@ class OverlappingStatementDeduplicationTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["shared_bill_owner_share"], 7500)
         self.assertEqual(result[0]["shared_bill_id"], 4)
+        self.assertEqual(result[0]["shared_bill_repaid_amount"], 5000)
 
     def test_keeps_manual_income_choice_when_duplicate_is_in_other_statement(self):
         transactions = [
@@ -620,6 +637,35 @@ class FinancialQuestionPromptTests(unittest.TestCase):
         ][0]["content"]
         self.assertIn('"income":1500.0', prompt)
         self.assertIn('"included_in_income":true', prompt)
+
+    @patch.object(ai_assistant, "get_client")
+    def test_prompt_counts_only_received_shared_bill_repayments_as_income(
+        self, get_client
+    ):
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(
+                '{"intent":"general","category":null,"answer":"Received repayments are income."}'
+            )
+        )
+        ai_assistant.understand_financial_question(
+            "How much income did I receive?",
+            [{
+                "amount": 15000,
+                "type": "debit",
+                "category": "Bills & Utilities",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_repaid_amount": 5000,
+            }],
+        )
+
+        prompt = get_client.return_value.chat.completions.create.call_args.kwargs[
+            "messages"
+        ][0]["content"]
+
+        self.assertIn('"income":5000.0', prompt)
+        self.assertIn('"shared_bill_repaid_amount_inr":5000.0', prompt)
+        self.assertIn("marks them as repaid", prompt)
 
     @patch.object(ai_assistant, "get_client")
     def test_prompt_reports_upi_activity_separately_from_income(self, get_client):

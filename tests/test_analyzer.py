@@ -84,3 +84,27 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(result["total_expenses"], 7500)
         self.assertEqual(result["category_totals"]["Bills & Utilities"], 7500)
         self.assertEqual(result["net_cash_flow"], -7500)
+
+    def test_only_marked_shared_bill_repayments_count_as_income(self):
+        result = analyze_transactions([
+            {
+                "amount": 15000,
+                "type": "debit",
+                "category": "Bills & Utilities",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_repaid_amount": 5000,
+            },
+            {
+                "amount": 10000,
+                "type": "debit",
+                "category": "Food",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 5000,
+                "shared_bill_repaid_amount": 0,
+            },
+        ])
+
+        self.assertEqual(result["total_income"], 5000)
+        self.assertEqual(result["total_expenses"], 12500)
+        self.assertEqual(result["net_cash_flow"], -7500)

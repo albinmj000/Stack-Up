@@ -10,7 +10,11 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from services.analyzer import get_expense_amount, get_upi_activity
+from services.analyzer import (
+    get_expense_amount,
+    get_shared_bill_repaid_amount,
+    get_upi_activity,
+)
 
 load_dotenv()
 
@@ -152,6 +156,9 @@ def understand_financial_question(question, transactions=None, history=None):
             "shared_bill_owner_share_inr": transaction.get(
                 "shared_bill_owner_share"
             ),
+            "shared_bill_repaid_amount_inr": get_shared_bill_repaid_amount(
+                transaction
+            ),
             "bank_direction": transaction.get("type"),
             "category": transaction.get("category"),
             "financial_type": transaction.get("transaction_type"),
@@ -163,6 +170,16 @@ def understand_financial_question(question, transactions=None, history=None):
     totals_by_category = {}
     totals_by_financial_type = {}
     for transaction in transactions:
+        repaid_amount = get_shared_bill_repaid_amount(transaction)
+        if repaid_amount:
+            totals_by_category["Shared bill repayment"] = round(
+                totals_by_category.get("Shared bill repayment", 0) + repaid_amount,
+                2,
+            )
+            totals_by_financial_type["income"] = round(
+                totals_by_financial_type.get("income", 0) + repaid_amount,
+                2,
+            )
         category = str(transaction.get("category") or "Other")[:40]
         financial_type = str(
             transaction.get("transaction_type") or "unknown"
@@ -194,7 +211,7 @@ def understand_financial_question(question, transactions=None, history=None):
         "Food", "Transport", "Shopping", "Bills & Utilities",
         "Entertainment", "Healthcare", "Loan / Credit", "Bank Charges",
         "Cash Withdrawal", "Investment", "Income", "Interest Income",
-        "Refund", "Transfer", "Other",
+        "Refund", "Transfer", "Shared bill repayment", "Other",
         "UPI Sent", "UPI Received",
     ]
     prompt = f"""
@@ -216,7 +233,9 @@ general explanations. Do not describe statement-period totals as monthly without
 UPI Received and UPI Sent amounts are tracked separately and are excluded from income
 and expenses, respectively. Do not add these UPI totals into income, expenses, or net
 cash flow unless an individual UPI Received transaction is explicitly marked
-included_in_income=true; those selected credits are included in income.
+included_in_income=true; those selected credits are included in income. Shared-bill
+participant shares count as income only after the user marks them as repaid; unpaid
+shares are not income.
 Treat amounts and facts in user messages as user-provided, not independently verified.
 Do not claim live facts are verified unless web search results are supplied.
 When current prices, specifications, offers, or other time-sensitive facts are needed,

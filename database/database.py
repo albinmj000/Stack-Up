@@ -1256,6 +1256,16 @@ def get_user_transactions(user_id):
                     WHERE shared_bills.transaction_id = transactions.id
                       AND shared_bills.user_id = transactions.user_id)
                        AS shared_bill_id,
+                   COALESCE((SELECT SUM(share_amount)
+                    FROM shared_bill_participants
+                    WHERE shared_bill_participants.shared_bill_id = (
+                        SELECT id FROM shared_bills
+                        WHERE shared_bills.transaction_id = transactions.id
+                          AND shared_bills.user_id = transactions.user_id
+                    )
+                      AND shared_bill_participants.user_id = transactions.user_id
+                      AND shared_bill_participants.is_paid = 1), 0)
+                       AS shared_bill_repaid_amount,
                    (SELECT bank_account_id FROM statements
                     WHERE statements.id = transactions.statement_id
                       AND statements.user_id = transactions.user_id) AS bank_account_id
@@ -1281,6 +1291,16 @@ def get_statement_transactions(user_id, statement_id):
                     WHERE shared_bills.transaction_id = transactions.id
                       AND shared_bills.user_id = transactions.user_id)
                        AS shared_bill_id,
+                   COALESCE((SELECT SUM(share_amount)
+                    FROM shared_bill_participants
+                    WHERE shared_bill_participants.shared_bill_id = (
+                        SELECT id FROM shared_bills
+                        WHERE shared_bills.transaction_id = transactions.id
+                          AND shared_bills.user_id = transactions.user_id
+                    )
+                      AND shared_bill_participants.user_id = transactions.user_id
+                      AND shared_bill_participants.is_paid = 1), 0)
+                       AS shared_bill_repaid_amount,
                    (SELECT bank_account_id FROM statements
                     WHERE statements.id = transactions.statement_id
                       AND statements.user_id = transactions.user_id) AS bank_account_id

@@ -116,6 +116,44 @@ class TransactionQueryTotalsTests(unittest.TestCase):
         self.assertEqual(category_totals["Bills & Utilities"], 7500)
         self.assertEqual(category_total, 7500)
 
+    @patch.object(transaction_query, "get_user_transactions")
+    def test_received_shared_bill_repayments_are_user_income(self, get_transactions):
+        get_transactions.return_value = [
+            {
+                "amount": 15000,
+                "type": "debit",
+                "category": "Bills & Utilities",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_repaid_amount": 5000,
+            },
+        ]
+
+        result = transaction_query.get_transaction_totals("user-a")
+
+        self.assertEqual(result["total_income"], 5000)
+        self.assertEqual(result["total_expenses"], 7500)
+
+    @patch.object(transaction_query, "get_statement_transactions")
+    def test_received_shared_bill_repayments_are_statement_income(
+        self, get_transactions
+    ):
+        get_transactions.return_value = [
+            {
+                "amount": 15000,
+                "type": "debit",
+                "category": "Bills & Utilities",
+                "transaction_type": "expense",
+                "shared_bill_owner_share": 7500,
+                "shared_bill_repaid_amount": 5000,
+            },
+        ]
+
+        result = transaction_query.get_statement_totals("user-a", 1)
+
+        self.assertEqual(result["total_income"], 5000)
+        self.assertEqual(result["total_expenses"], 7500)
+
     @patch.object(transaction_query, "get_statement_transactions")
     def test_statement_category_totals_use_shared_owner_share(self, get_transactions):
         get_transactions.return_value = [
