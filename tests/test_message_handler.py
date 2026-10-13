@@ -9,25 +9,34 @@ from services import ai_assistant, message_handler
 
 
 class TransactionTotalTests(unittest.TestCase):
-    def test_upi_received_is_income_in_assistant_totals(self):
+    def test_upi_activity_is_separate_in_assistant_totals(self):
         totals = message_handler.transaction_totals([
             {
                 "amount": 1500,
                 "type": "credit",
                 "category": "UPI Received",
-                "transaction_type": "transfer",
+                "transaction_type": "income",
             },
             {
                 "amount": 500,
                 "type": "debit",
                 "category": "UPI Sent",
-                "transaction_type": "transfer",
+                "transaction_type": "expense",
+            },
+            {
+                "amount": 200,
+                "type": "debit",
+                "category": "Transfer",
+                "transaction_type": "income",
             },
         ])
 
-        self.assertEqual(totals["total_income"], 1500)
+        self.assertEqual(totals["total_income"], 0)
+        self.assertEqual(totals["total_expenses"], 200)
         self.assertEqual(totals["total_transfer_in"], 0)
-        self.assertEqual(totals["total_transfer_out"], 500)
+        self.assertEqual(totals["total_transfer_out"], 200)
+        self.assertEqual(totals["total_upi_received"], 1500)
+        self.assertEqual(totals["total_upi_sent"], 500)
 
 
 class OverlappingStatementDeduplicationTests(unittest.TestCase):
@@ -487,6 +496,39 @@ class FinancialQuestionPromptTests(unittest.TestCase):
         self.assertIn('"amount_inr":100', prompt)
         self.assertIn("Recent transaction details omitted: 70", prompt)
         self.assertNotIn("x" * 101, prompt)
+
+    @patch.object(ai_assistant, "get_client")
+    def test_prompt_reports_upi_activity_separately_from_income(self, get_client):
+        get_client.return_value.chat.completions.create.return_value = (
+            self.response_with_content(
+                '{"intent":"general","category":null,"answer":"UPI totals are separate."}'
+            )
+        )
+        transactions = [
+            {
+                "amount": 1500,
+                "type": "credit",
+                "category": "UPI Received",
+                "transaction_type": "income",
+            },
+            {
+                "amount": 500,
+                "type": "debit",
+                "category": "UPI Sent",
+                "transaction_type": "expense",
+            },
+        ]
+
+        ai_assistant.understand_financial_question(
+            "What is my income?", transactions
+        )
+
+        prompt = get_client.return_value.chat.completions.create.call_args.kwargs[
+            "messages"
+        ][0]["content"]
+        self.assertIn('"upi_received":1500.0', prompt)
+        self.assertIn('"upi_sent":500.0', prompt)
+        self.assertIn("excluded from income", prompt)
 
     @patch.object(ai_assistant, "get_client")
     def test_financial_answer_preserves_multiline_text(self, get_client):

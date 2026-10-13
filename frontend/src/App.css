@@ -866,6 +866,56 @@ gap: 15px;
 margin-bottom: 20px;
 }
 
+.upi-activity-panel {
+display: grid;
+grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+align-items: center;
+gap: 20px;
+margin-bottom: 16px;
+}
+
+.upi-activity-heading h2 {
+margin: 0 0 6px;
+color: #e8f0e9;
+font-family: “Manrope”, sans-serif;
+font-size: 14px;
+font-weight: 700;
+}
+
+.upi-activity-heading p {
+margin: 0;
+color: #829087;
+font-size: 11px;
+line-height: 1.6;
+}
+
+.upi-activity-grid {
+display: grid;
+grid-template-columns: repeat(2, minmax(0, 1fr));
+gap: 10px;
+}
+
+.upi-activity-grid article {
+display: grid;
+gap: 7px;
+min-width: 0;
+padding: 13px 15px;
+border: 1px solid #26372c;
+border-radius: 10px;
+background: rgba(255, 255, 255, 0.02);
+}
+
+.upi-activity-grid article span {
+color: #91a095;
+font-size: 10px;
+}
+
+.upi-activity-grid article strong {
+color: #62e6a7;
+font-size: 17px;
+overflow-wrap: anywhere;
+}
+
 .stat-card {
 position: relative;
 min-width: 0;
@@ -2133,6 +2183,10 @@ gap: 12px;
 margin-bottom: 16px;
 }
 
+.upi-analytics-totals {
+grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .analytics-totals article {
 display: grid;
 gap: 8px;
@@ -2861,6 +2915,11 @@ grid-template-columns: repeat(2, minmax(0, 1fr));
 
 .analytics-totals {
 grid-template-columns: minmax(0, 1fr);
+}
+
+.upi-activity-panel {
+grid-template-columns: minmax(0, 1fr);
+gap: 14px;
 }
 
 .category-detail-layout {
@@ -3950,6 +4009,37 @@ color: #a33333;
 border-color: #bfe0c7;
 color: #205a33;
 background: #edf8ef;
+}
+
+:root[data-theme="light"] .upi-activity-heading h2 {
+color: #243a2b;
+}
+
+:root[data-theme="light"] .upi-activity-heading p,
+:root[data-theme="light"] .upi-activity-grid article span {
+color: #5c7062;
+}
+
+:root[data-theme="light"] .upi-activity-grid article {
+border-color: #dce8df;
+background: #f6faf7;
+}
+
+:root[data-theme="light"] .upi-activity-grid article strong {
+color: #16864a;
+}
+
+:root[data-theme="light"] .upi-analytics-totals article {
+border-color: #dce8df;
+background: linear-gradient(145deg, #ffffff, #f9fbf9);
+}
+
+:root[data-theme="light"] .upi-analytics-totals article span {
+color: #5c7062;
+}
+
+:root[data-theme="light"] .upi-analytics-totals article strong {
+color: #243a2b;
 }
 
 :root[data-theme="light"] .error-message {

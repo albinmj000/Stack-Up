@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
+from services.analyzer import get_upi_activity
 
 load_dotenv()
 
@@ -162,8 +163,11 @@ def understand_financial_question(question, transactions=None, history=None):
         financial_type = str(
             transaction.get("transaction_type") or "unknown"
         ).lower()
-        if category.casefold() == "upi received":
-            financial_type = "income"
+        upi_activity = get_upi_activity(transaction)
+        if upi_activity:
+            financial_type = f"upi_{upi_activity}"
+        elif category.casefold() == "transfer":
+            financial_type = "transfer"
         try:
             amount = abs(float(transaction.get("amount") or 0))
         except (TypeError, ValueError):
@@ -197,6 +201,9 @@ Keep existing financial query intents when applicable:
 
 For personal finance claims, distinguish selected-statement facts from estimates and
 general explanations. Do not describe statement-period totals as monthly without evidence.
+UPI Received and UPI Sent amounts are tracked separately and are excluded from income
+and expenses, respectively. Do not add these UPI totals into income, expenses, or net
+cash flow when answering a question.
 Treat amounts and facts in user messages as user-provided, not independently verified.
 Do not claim live facts are verified unless web search results are supplied.
 When current prices, specifications, offers, or other time-sensitive facts are needed,

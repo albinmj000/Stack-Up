@@ -1,6 +1,18 @@
 # Stack Up
 
 Stack Up is a personal finance application for uploading Indian bank statement PDFs, reviewing categorized transactions, exploring cash flow and spending analytics, and asking an AI assistant questions about saved transactions. The dashboard can combine transactions across uploaded statements, deduplicating overlapping rows for combined totals while preserving the original statement records. User accounts, statement history, parsed transactions, and original uploaded PDFs are private to each account.
+Users can create named bank accounts, assign statements to them, and select one or more statements (or select all) for dashboard calculations. Selected overlapping transactions are deduplicated for combined totals.
+
+Create a bank account in the dashboard's **Select statements** menu, choose an
+account before uploading, or assign an existing statement from that same menu
+or Statement History. The selector groups each account's statements, supports
+selecting an entire account or all statements, and recalculates dashboard totals
+from only the selected PDFs. Identical transaction details are not deduplicated
+across different named bank accounts.
+
+UPI Received and UPI Sent activity is shown separately on the dashboard and in
+analytics; it is excluded from income, expenses, net cash flow, and savings-rate
+calculations. Other outgoing transfers remain included in total expenses.
 
 ## Project layout
 

@@ -1,11 +1,30 @@
 from collections import defaultdict
 
 
+def get_upi_activity(transaction):
+    category = str(transaction.get("category") or "").strip().casefold()
+    if category == "upi received":
+        return "received"
+    if category == "upi sent":
+        return "sent"
+    if category == "transfer" and "upi" in str(
+        transaction.get("description") or ""
+    ).casefold():
+        direction = str(transaction.get("type") or "").strip().lower()
+        if direction == "credit":
+            return "received"
+        if direction == "debit":
+            return "sent"
+    return None
+
+
 def analyze_transactions(transactions):
     total_income = 0.0
     total_expenses = 0.0
     total_transfer_in = 0.0
     total_transfer_out = 0.0
+    total_upi_received = 0.0
+    total_upi_sent = 0.0
     total_unknown = 0.0
 
     category_totals = defaultdict(float)
@@ -29,9 +48,11 @@ def analyze_transactions(transactions):
             transaction.get("category") or "Other"
         ).strip()
 
-        if category.casefold() == "upi received":
-            total_income += amount
-
+        upi_activity = get_upi_activity(transaction)
+        if upi_activity == "received":
+            total_upi_received += amount
+        elif upi_activity == "sent":
+            total_upi_sent += amount
         elif category.lower() == "transfer" or transaction_type == "transfer":
             if direction == "credit":
                 total_transfer_in += amount
@@ -66,6 +87,8 @@ def analyze_transactions(transactions):
         "total_expenses": round(total_expenses, 2),
         "total_transfer_in": round(total_transfer_in, 2),
         "total_transfer_out": round(total_transfer_out, 2),
+        "total_upi_received": round(total_upi_received, 2),
+        "total_upi_sent": round(total_upi_sent, 2),
         "total_unknown": round(total_unknown, 2),
         "net_cash_flow": round(net_cash_flow, 2),
         "savings_rate": round(savings_rate, 2),

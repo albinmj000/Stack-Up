@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from groq import APIConnectionError, APITimeoutError, RateLimitError
+from services.analyzer import get_upi_activity
 from services.correction_parser import process_correction_message
 from services.ai_assistant import (
     calculate_emi_from_conversation,
@@ -103,6 +104,8 @@ def transaction_totals(transactions):
         "total_expenses": 0.0,
         "total_transfer_in": 0.0,
         "total_transfer_out": 0.0,
+        "total_upi_received": 0.0,
+        "total_upi_sent": 0.0,
         "total_unknown": 0.0,
     }
     for transaction in transactions:
@@ -112,16 +115,21 @@ def transaction_totals(transactions):
         ).lower()
         direction = str(transaction.get("type") or "").lower()
         category = str(transaction.get("category") or "").strip().casefold()
-        if category == "upi received" or transaction_type == "income":
+        upi_activity = get_upi_activity(transaction)
+        if upi_activity == "received":
+            totals["total_upi_received"] += amount
+        elif upi_activity == "sent":
+            totals["total_upi_sent"] += amount
+        elif category == "transfer" or transaction_type == "transfer":
+            if direction == "credit":
+                totals["total_transfer_in"] += amount
+            else:
+                totals["total_transfer_out"] += amount
+                totals["total_expenses"] += amount
+        elif transaction_type == "income":
             totals["total_income"] += amount
         elif transaction_type == "expense":
             totals["total_expenses"] += amount
-        elif transaction_type == "transfer":
-            if direction == "credit":
-                totals["total_transfer_in"] += amount
-            elif direction == "debit":
-                totals["total_transfer_out"] += amount
-                totals["total_expenses"] += amount
         else:
             totals["total_unknown"] += amount
     return {name: round(value, 2) for name, value in totals.items()}
@@ -254,6 +262,8 @@ def format_statement_summary(user_id, transactions=None):
         f"• Net cash flow: INR {net:,.2f}",
         f"• Transfers in: INR {totals['total_transfer_in']:,.2f}",
         f"• Transfers out: INR {totals['total_transfer_out']:,.2f}",
+        f"• UPI received: INR {totals['total_upi_received']:,.2f}",
+        f"• UPI sent: INR {totals['total_upi_sent']:,.2f}",
         "",
         "Spending by category:",
     ]

@@ -136,12 +136,16 @@ function getTransactionCategory(transaction) {
 
 function getAnalyticsCategory(transaction) {
   const category = getTransactionCategory(transaction);
-  if (category === "Transfer" && /\bupi\b/i.test(transaction.description ?? "")) {
+  if (String(category).trim().toLowerCase() === "transfer" && /\bupi\b/i.test(transaction.description ?? "")) {
     return String(transaction.type ?? "").toLowerCase() === "credit"
       ? "UPI Received"
       : "UPI Sent";
   }
   return category;
+}
+
+function isUpiActivity(transaction, activity) {
+  return String(getAnalyticsCategory(transaction)).trim().toLowerCase() === `upi ${activity}`;
 }
 
 function getFollowUpQuestions(result, askedQuestion = "") {
@@ -1086,6 +1090,8 @@ function App() {
     : dashboardSelectionData?.analysis ?? null;
   const totalIncome = Number(displayAnalysis?.total_income ?? 0);
   const totalExpenses = Number(displayAnalysis?.total_expenses ?? 0);
+  const totalUpiReceived = Number(displayAnalysis?.total_upi_received ?? 0);
+  const totalUpiSent = Number(displayAnalysis?.total_upi_sent ?? 0);
   const netCashFlow = Number(
     displayAnalysis?.net_cash_flow ?? totalIncome - totalExpenses
   );
@@ -1229,8 +1235,10 @@ function App() {
       count: 0,
     };
     const amount = getAmount(transaction);
-    if (getAmountDirection(transaction) === "income") daily.income += amount;
-    else daily.expenses += amount;
+    if (!isUpiActivity(transaction, "received") && !isUpiActivity(transaction, "sent")) {
+      if (getAmountDirection(transaction) === "income") daily.income += amount;
+      else daily.expenses += amount;
+    }
     daily.count += 1;
     timelineByDate.set(dateKey, daily);
   });
@@ -1297,11 +1305,22 @@ function App() {
 
   const incomeTransactions = displayTransactions.filter(
     (transaction) =>
-      getAnalyticsCategory(transaction) === "UPI Received" ||
+      !isUpiActivity(transaction, "received") &&
+      !isUpiActivity(transaction, "sent") &&
+      String(getAnalyticsCategory(transaction)).trim().toLowerCase() !== "transfer" &&
       String(transaction.transaction_type ?? "").toLowerCase() === "income"
   );
   const expenseTransactions = displayTransactions.filter(
-    (transaction) => String(transaction.transaction_type ?? "").toLowerCase() === "expense"
+    (transaction) =>
+      !isUpiActivity(transaction, "received") &&
+      !isUpiActivity(transaction, "sent") &&
+      (
+        String(transaction.transaction_type ?? "").toLowerCase() === "expense" ||
+        (
+          String(transaction.transaction_type ?? "").toLowerCase() === "transfer" &&
+          String(transaction.type ?? "").toLowerCase() === "debit"
+        )
+      )
   );
   const selectedMetricTransactions = selectedMetric === "total_income"
     ? incomeTransactions
@@ -1338,19 +1357,19 @@ function App() {
       title: "Net cash flow",
       value: money(netCashFlow),
       formula: `${money(totalIncome)} total income - ${money(totalExpenses)} total expenses = ${money(netCashFlow)}`,
-      explanation: `Calculated from ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expense transactions. Transfers and unknown transactions are excluded.`,
+      explanation: `Calculated from ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expenses/outgoing non-UPI transfers. UPI activity and unknown transactions are excluded.`,
     },
     total_income: {
       title: "Total income",
       value: money(totalIncome),
       formula: `Sum of ${incomeTransactions.length} transactions marked as income = ${money(totalIncome)}`,
-      explanation: "Only transactions classified as income are included. Transfers are excluded.",
+      explanation: "Only transactions classified as income are included. UPI activity is tracked separately.",
     },
     total_expenses: {
       title: "Total expenses",
       value: money(totalExpenses),
-      formula: `Sum of ${expenseTransactions.length} transactions marked as expenses = ${money(totalExpenses)}`,
-      explanation: "Only transactions classified as expenses are included. Transfers are excluded.",
+      formula: `Sum of ${expenseTransactions.length} expenses and outgoing non-UPI transfers = ${money(totalExpenses)}`,
+      explanation: "Expenses and outgoing non-UPI transfers are included. UPI Sent and UPI Received are tracked separately.",
     },
     savings_rate: {
       title: "Savings rate",
@@ -1358,7 +1377,7 @@ function App() {
       formula: totalIncome > 0
         ? `(${money(totalIncome)} income - ${money(totalExpenses)} expenses) / ${money(totalIncome)} income = ${savingsRate.toFixed(1)}%`
         : "Savings rate is 0% because there is no income recorded.",
-      explanation: `Uses ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expense transactions. Transfers and unknown transactions are excluded.`,
+      explanation: `Uses ${incomeTransactions.length} income transactions and ${expenseTransactions.length} expenses/outgoing non-UPI transfers. UPI activity and unknown transactions are excluded.`,
     },
   };
   const metricDetail = selectedMetric ? metricDetails[selectedMetric] : null;
@@ -1753,7 +1772,7 @@ function App() {
                     {hasRealData ? money(totalIncome) : "—"}
                   </div>
                   <div className="stat-foot">
-                    <span>{hasRealData ? "Analyzed credits" : "Awaiting data"}</span>
+                    <span>{hasRealData ? "Income credits (UPI separate)" : "Awaiting data"}</span>
                   </div>
                   <div className="mini-bars income-bars">
                     <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
@@ -1769,7 +1788,7 @@ function App() {
                     {hasRealData ? money(totalExpenses) : "—"}
                   </div>
                   <div className="stat-foot">
-                    <span>{hasRealData ? "Analyzed debits" : "Awaiting data"}</span>
+                    <span>{hasRealData ? "Expenses + transfers (UPI separate)" : "Awaiting data"}</span>
                   </div>
                   <div className="mini-bars expense-bars">
                     <i /><i /><i /><i /><i /><i /><i /><i /><i /><i />
@@ -1791,6 +1810,23 @@ function App() {
                     <span style={{ width: `${Math.min(100, Math.max(0, savingsRate))}%` }} />
                   </div>
                 </button>
+              </section>
+
+              <section className="panel upi-activity-panel">
+                <div className="upi-activity-heading">
+                  <h2>UPI activity</h2>
+                  <p>Tracked separately and excluded from income and expenses.</p>
+                </div>
+                <div className="upi-activity-grid">
+                  <article>
+                    <span>UPI received</span>
+                    <strong>{hasRealData ? money(totalUpiReceived) : "—"}</strong>
+                  </article>
+                  <article>
+                    <span>UPI sent</span>
+                    <strong>{hasRealData ? money(totalUpiSent) : "—"}</strong>
+                  </article>
+                </div>
               </section>
 
               {dashboardSelectionIds.length !== 1 ? (
@@ -2563,6 +2599,10 @@ function App() {
                     <article><span>Total income</span><strong>{money(totalIncome)}</strong></article>
                     <article><span>Total expenses</span><strong>{money(totalExpenses)}</strong></article>
                     <article><span>Net cash flow</span><strong>{money(netCashFlow)}</strong></article>
+                  </div>
+                  <div className="analytics-totals upi-analytics-totals">
+                    <article><span>UPI received (separate)</span><strong>{money(totalUpiReceived)}</strong></article>
+                    <article><span>UPI sent (separate)</span><strong>{money(totalUpiSent)}</strong></article>
                   </div>
 
                   {allCategoryEntries.length > 0 ? (

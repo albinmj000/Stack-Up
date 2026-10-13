@@ -2,6 +2,7 @@ from database.database import (
     get_user_transactions,
     get_statement_transactions
 )
+from services.analyzer import get_upi_activity
 from services.transaction_processor import rule_based_category
 
 
@@ -53,6 +54,8 @@ def get_transaction_totals(user_id):
     total_expenses = 0.0
     total_transfer_in = 0.0
     total_transfer_out = 0.0
+    total_upi_received = 0.0
+    total_upi_sent = 0.0
     total_unknown = 0.0
 
     for transaction in transactions:
@@ -64,25 +67,34 @@ def get_transaction_totals(user_id):
             "unknown"
         )
         category = str(transaction.get("category") or "").strip().casefold()
+        upi_activity = get_upi_activity(transaction)
 
-        if category == "upi received" or transaction_type == "income":
+        if upi_activity == "received":
+
+            total_upi_received += amount
+
+        elif upi_activity == "sent":
+
+            total_upi_sent += amount
+
+        elif category == "transfer" or transaction_type == "transfer":
+
+            if transaction["type"] == "credit":
+
+                total_transfer_in += amount
+
+            else:
+
+                total_transfer_out += amount
+                total_expenses += amount
+
+        elif transaction_type == "income":
 
             total_income += amount
 
         elif transaction_type == "expense":
 
             total_expenses += amount
-
-        elif transaction_type == "transfer":
-
-            if transaction["type"] == "credit":
-
-                total_transfer_in += amount
-
-            elif transaction["type"] == "debit":
-
-                total_transfer_out += amount
-                total_expenses += amount
 
         elif transaction_type == "unknown":
 
@@ -105,6 +117,8 @@ def get_transaction_totals(user_id):
             total_transfer_out,
             2
         ),
+        "total_upi_received": round(total_upi_received, 2),
+        "total_upi_sent": round(total_upi_sent, 2),
         "total_unknown": round(
             total_unknown,
             2
@@ -126,6 +140,8 @@ def get_statement_totals(
     total_expenses = 0.0
     total_transfer_in = 0.0
     total_transfer_out = 0.0
+    total_upi_received = 0.0
+    total_upi_sent = 0.0
     total_unknown = 0.0
 
     for transaction in transactions:
@@ -137,25 +153,34 @@ def get_statement_totals(
             "unknown"
         )
         category = str(transaction.get("category") or "").strip().casefold()
+        upi_activity = get_upi_activity(transaction)
 
-        if category == "upi received" or transaction_type == "income":
+        if upi_activity == "received":
+
+            total_upi_received += amount
+
+        elif upi_activity == "sent":
+
+            total_upi_sent += amount
+
+        elif category == "transfer" or transaction_type == "transfer":
+
+            if transaction["type"] == "credit":
+
+                total_transfer_in += amount
+
+            else:
+
+                total_transfer_out += amount
+                total_expenses += amount
+
+        elif transaction_type == "income":
 
             total_income += amount
 
         elif transaction_type == "expense":
 
             total_expenses += amount
-
-        elif transaction_type == "transfer":
-
-            if transaction["type"] == "credit":
-
-                total_transfer_in += amount
-
-            elif transaction["type"] == "debit":
-
-                total_transfer_out += amount
-                total_expenses += amount
 
         elif transaction_type == "unknown":
 
@@ -178,6 +203,8 @@ def get_statement_totals(
             total_transfer_out,
             2
         ),
+        "total_upi_received": round(total_upi_received, 2),
+        "total_upi_sent": round(total_upi_sent, 2),
         "total_unknown": round(
             total_unknown,
             2
