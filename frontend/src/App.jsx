@@ -658,9 +658,18 @@ function App() {
     setUploadBankAccountId((current) => (
       accountsResult.bank_accounts?.some((item) => String(item.id) === current) ? current : ""
     ));
-    setSelectedDashboardStatementIds((current) => current === null
-      ? null
-      : current.filter((id) => nextStatements.some((statement) => statement.statement_id === id)));
+    setSelectedDashboardStatementIds((current) => {
+      if (current === null) {
+        return nextStatements[0] ? [nextStatements[0].statement_id] : [];
+      }
+      const availableIds = new Set(
+        nextStatements.map((statement) => statement.statement_id)
+      );
+      const remainingSelection = current.filter((id) => availableIds.has(id));
+      return current.length > 0 && remainingSelection.length === 0 && nextStatements[0]
+        ? [nextStatements[0].statement_id]
+        : remainingSelection;
+    });
     setAiStatementIds((current) => {
       const available = new Set(nextStatements.map((statement) => statement.statement_id));
       const stillAvailable = current.filter((id) => available.has(id));
@@ -683,7 +692,9 @@ function App() {
 
   async function selectDashboardStatement(value) {
     if (value === "all") {
-      setSelectedDashboardStatementIds(null);
+      setSelectedDashboardStatementIds(
+        statements.map((statement) => statement.statement_id)
+      );
       setError("");
       return;
     }
@@ -700,7 +711,7 @@ function App() {
       return;
     }
     const current = selectedDashboardStatementIds
-      ?? statements.map((statement) => statement.statement_id);
+      ?? (statements[0] ? [statements[0].statement_id] : []);
     setSelectedDashboardStatementIds(current.includes(statementId)
       ? current.filter((id) => id !== statementId)
       : [...current, statementId]);
@@ -709,12 +720,12 @@ function App() {
 
   function toggleDashboardStatementGroup(groupStatements, checked) {
     const current = selectedDashboardStatementIds
-      ?? statements.map((statement) => statement.statement_id);
+      ?? (statements[0] ? [statements[0].statement_id] : []);
     const groupIds = groupStatements.map((statement) => statement.statement_id);
     const nextIds = checked
       ? [...new Set([...current, ...groupIds])]
       : current.filter((id) => !groupIds.includes(id));
-    setSelectedDashboardStatementIds(nextIds.length === statements.length ? null : nextIds);
+    setSelectedDashboardStatementIds(nextIds);
   }
 
   async function createBankAccount(event) {
@@ -1134,6 +1145,9 @@ function App() {
         }
         setSelectedDashboardStatementIds(null);
         await refreshStatementHistory();
+        if (result.statement_id != null) {
+          setSelectedDashboardStatementIds([result.statement_id]);
+        }
         setNotice(result.message || "This statement was already uploaded.");
         return;
       }
@@ -1148,6 +1162,9 @@ function App() {
       setMessages([]);
       try {
         await refreshStatementHistory();
+        if (result.statement_id != null) {
+          setSelectedDashboardStatementIds([result.statement_id]);
+        }
       } catch (historyError) {
         console.error("Statement uploaded but history refresh failed.", historyError);
       }
@@ -1266,8 +1283,9 @@ function App() {
   }
 
   const dashboardSelectionIds = selectedDashboardStatementIds
-    ?? statements.map((statement) => statement.statement_id);
-  const useCombinedScope = selectedDashboardStatementIds === null && statements.length > 0;
+    ?? (statements[0] ? [statements[0].statement_id] : []);
+  const useCombinedScope = statements.length > 0
+    && dashboardSelectionIds.length === statements.length;
   const hasMultipleDashboardStatements = dashboardSelectionIds.length > 1;
   const allDashboardStatementsSelected = statements.length > 0
     && dashboardSelectionIds.length === statements.length;
@@ -1915,7 +1933,9 @@ function App() {
                               type="checkbox"
                               checked={allDashboardStatementsSelected}
                               onChange={(event) => setSelectedDashboardStatementIds(
-                                event.target.checked ? null : []
+                                event.target.checked
+                                  ? statements.map((statement) => statement.statement_id)
+                                  : []
                               )}
                             />
                             <strong>Select all statements</strong>
