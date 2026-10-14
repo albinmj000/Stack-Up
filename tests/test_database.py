@@ -525,13 +525,13 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertEqual(request.get_header("User-agent"), "Stack-Up/1.0")
         self.assertEqual(payload["from"], "onboarding@resend.dev")
         self.assertEqual(payload["to"], ["person@example.test"])
-        self.assertEqual(payload["subject"], "One quick step to Stack Up")
+        self.assertEqual(payload["subject"], "Your Stack Up sign-in code")
         self.assertIn("123456", payload["text"])
-        self.assertIn("Welcome to Stack Up", payload["text"])
+        self.assertIn("Use this verification code to continue in Stack Up", payload["text"])
         self.assertIn("expires in 10 minutes", payload["text"])
-        self.assertIn("safely ignore this email", payload["text"])
+        self.assertIn("safely ignore it", payload["text"])
         self.assertIn("123456", payload["html"])
-        self.assertIn("Welcome to a smarter money routine", payload["html"])
+        self.assertIn("Your Stack Up sign-in code", payload["html"])
         self.assertIn(
             'src="https://stack-up.example.test/stackup-logo-email.svg"',
             payload["html"],

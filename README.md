@@ -91,10 +91,6 @@ Configure the OTP delivery variables needed by your providers:
 - For production email after verifying a domain with Resend, set `RESEND_FROM_EMAIL` to a sender on that verified domain. The test-recipient restriction applies only to `onboarding@resend.dev`.
 - SMS through Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
 
-OTP emails load the Stack Up logo from `/stackup-logo-email.svg` on the first
-origin in `FRONTEND_URL`. Deploy the frontend with this public asset available
-at its site root so it appears in supported email clients.
-
 Email OTPs use Resend's HTTPS API; the backend does not fall back to SMTP. SMS OTPs continue to use Twilio.
 
 ### Account settings and data controls

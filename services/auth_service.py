@@ -156,14 +156,13 @@ def _send_email_otp(email, code):
     payload = json.dumps({
         "from": sender,
         "to": [email],
-        "subject": "One quick step to Stack Up",
+        "subject": "Your Stack Up sign-in code",
         "text": (
-            "Welcome to Stack Up!\n\n"
-            "You're one quick step away from your personal finance workspace. "
-            "Enter this verification code to continue:\n\n"
+            "Hello,\n\n"
+            "Use this verification code to continue in Stack Up:\n\n"
             f"{code}\n\n"
-            "The code expires in 10 minutes. If you didn't request it, you can "
-            "safely ignore this email.\n\n"
+            "This code expires in 10 minutes. If you did not request this "
+            "verification email, you can safely ignore it.\n\n"
             "Stack Up"
         ),
         "html": (
@@ -175,10 +174,10 @@ def _send_email_otp(email, code):
             'width="210" style="display:block;width:210px;height:auto;'
             'margin:0 0 24px;border:0;">'
             '<h1 style="margin:0 0 12px;font-size:25px;line-height:1.3;">'
-            'Welcome to a smarter money routine.</h1>'
+            'Your Stack Up sign-in code</h1>'
             '<p style="margin:0 0 24px;color:#5b6c60;font-size:15px;'
-            'line-height:1.6;">You’re one quick step away from your personal '
-            'finance workspace. Enter this code to continue:</p>'
+            'line-height:1.6;">Use this verification code to continue in '
+            'Stack Up:</p>'
             f'<div style="padding:18px;text-align:center;background:#eff8f1;'
             'border:1px solid #d6eedc;border-radius:12px;color:#137541;'
             f'font-size:32px;font-weight:700;letter-spacing:8px;">{code}</div>'
