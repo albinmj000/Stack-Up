@@ -8,6 +8,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from html import escape as escape_html
 from email.utils import parseaddr
 
 from database.database import (
@@ -141,11 +142,55 @@ def _send_email_otp(email, code):
                 "Email verification is currently restricted to the configured Resend test recipient."
             )
 
+    frontend_url = (
+        os.getenv("FRONTEND_URL", "https://app.stackupfinance.site")
+        .split(",", 1)[0]
+        .strip()
+        .rstrip("/")
+    ) or "https://app.stackupfinance.site"
+    logo_url = escape_html(
+        f"{frontend_url}/stackup-logo-email.svg",
+        quote=True,
+    )
+
     payload = json.dumps({
         "from": sender,
         "to": [email],
-        "subject": "Your Stack Up sign-in code",
-        "text": f"Your Stack Up verification code is {code}. It expires in 10 minutes.",
+        "subject": "One quick step to Stack Up",
+        "text": (
+            "Welcome to Stack Up!\n\n"
+            "You're one quick step away from your personal finance workspace. "
+            "Enter this verification code to continue:\n\n"
+            f"{code}\n\n"
+            "The code expires in 10 minutes. If you didn't request it, you can "
+            "safely ignore this email.\n\n"
+            "Stack Up"
+        ),
+        "html": (
+            '<div style="margin:0;padding:36px 16px;background:#f2f7f3;'
+            'font-family:Arial,Helvetica,sans-serif;color:#1c2c22;">'
+            '<div style="max-width:480px;margin:0 auto;padding:32px;'
+            'background:#ffffff;border:1px solid #dce9df;border-radius:18px;">'
+            f'<img src="{logo_url}" alt="Stack Up — Personal Finance" '
+            'width="210" style="display:block;width:210px;height:auto;'
+            'margin:0 0 24px;border:0;">'
+            '<h1 style="margin:0 0 12px;font-size:25px;line-height:1.3;">'
+            'Welcome to a smarter money routine.</h1>'
+            '<p style="margin:0 0 24px;color:#5b6c60;font-size:15px;'
+            'line-height:1.6;">You’re one quick step away from your personal '
+            'finance workspace. Enter this code to continue:</p>'
+            f'<div style="padding:18px;text-align:center;background:#eff8f1;'
+            'border:1px solid #d6eedc;border-radius:12px;color:#137541;'
+            f'font-size:32px;font-weight:700;letter-spacing:8px;">{code}</div>'
+            '<p style="margin:18px 0 0;color:#6c7c70;font-size:13px;'
+            'line-height:1.6;">This code expires in <strong>10 minutes</strong>.'
+            '</p><hr style="margin:24px 0;border:0;border-top:1px solid #e7eee9;">'
+            '<p style="margin:0;color:#748278;font-size:12px;line-height:1.6;">'
+            'If you didn’t request this email, you can safely ignore it. '
+            'Your account can’t be verified without this code.</p>'
+            '<p style="margin:22px 0 0;color:#16834a;font-size:13px;'
+            'font-weight:700;">Your money, smarter.</p></div></div>'
+        ),
     }).encode()
     request = urllib.request.Request(
         "https://api.resend.com/emails",

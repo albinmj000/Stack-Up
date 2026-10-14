@@ -513,6 +513,7 @@ class EmailDeliveryTests(unittest.TestCase):
             "RESEND_API_KEY": "test-api-key",
             "RESEND_FROM_EMAIL": "",
             "RESEND_TEST_RECIPIENT": "person@example.test",
+            "FRONTEND_URL": "https://stack-up.example.test",
         }), patch("services.auth_service.urllib.request.urlopen", return_value=response) as send:
             _send_email_otp("person@example.test", "123456")
 
@@ -524,7 +525,18 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertEqual(request.get_header("User-agent"), "Stack-Up/1.0")
         self.assertEqual(payload["from"], "onboarding@resend.dev")
         self.assertEqual(payload["to"], ["person@example.test"])
+        self.assertEqual(payload["subject"], "One quick step to Stack Up")
         self.assertIn("123456", payload["text"])
+        self.assertIn("Welcome to Stack Up", payload["text"])
+        self.assertIn("expires in 10 minutes", payload["text"])
+        self.assertIn("safely ignore this email", payload["text"])
+        self.assertIn("123456", payload["html"])
+        self.assertIn("Welcome to a smarter money routine", payload["html"])
+        self.assertIn(
+            'src="https://stack-up.example.test/stackup-logo-email.svg"',
+            payload["html"],
+        )
+        self.assertIn('alt="Stack Up — Personal Finance"', payload["html"])
 
     def test_resend_test_sender_rejects_unlisted_recipient(self):
         with patch.dict(os.environ, {
