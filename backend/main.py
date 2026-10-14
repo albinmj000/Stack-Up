@@ -137,7 +137,29 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Stack-Up-Session-Token", "X-Stack-Up-Device-Token"],
 )
+
+
+@app.middleware("http")
+async def accept_native_app_tokens(request: Request, call_next):
+    # The native app cannot rely on cross-site cookies in its WebView, so it
+    # sends the same tokens in headers. They are validated exactly like cookies.
+    extra = []
+    for header, cookie_name in (
+        ("x-stack-up-session-token", "stack_up_session"),
+        ("x-stack-up-device-token", "stack_up_device"),
+    ):
+        value = request.headers.get(header)
+        if value and cookie_name not in request.cookies:
+            extra.append(f"{cookie_name}={value}")
+    if extra:
+        existing = request.headers.get("cookie")
+        combined = "; ".join(([existing] if existing else []) + extra)
+        headers = [(k, v) for k, v in request.scope["headers"] if k != b"cookie"]
+        headers.append((b"cookie", combined.encode("latin-1")))
+        request.scope["headers"] = headers
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -179,7 +201,10 @@ def authenticated_account(request: Request):
     return account
 
 
-def set_auth_cookies(response, session_token, device_token):
+def set_auth_cookies(response, session_token, device_token, request=None):
+    if request is not None and request.headers.get("x-stack-up-client") == "native":
+        response.headers["X-Stack-Up-Session-Token"] = session_token
+        response.headers["X-Stack-Up-Device-Token"] = device_token
     response.set_cookie(
         key="stack_up_session",
         value=session_token,
@@ -266,7 +291,7 @@ async def auth_verify_otp(request: Request, response: Response, payload: dict = 
         request.cookies.get("stack_up_device"),
         account["user_id"],
     )
-    set_auth_cookies(response, token, device_token)
+    set_auth_cookies(response, token, device_token, request)
     return {"status": "success", "account": {"email": account.get("email"), "phone": account.get("phone"), "username": account.get("username")}}
 
 
@@ -295,7 +320,7 @@ async def auth_login(request: Request, response: Response, payload: dict = Body(
         request.cookies.get("stack_up_device"),
         account["user_id"],
     )
-    set_auth_cookies(response, token, device_token)
+    set_auth_cookies(response, token, device_token, request)
     return {"status": "success", "account": {"email": account.get("email"), "phone": account.get("phone"), "username": account.get("username")}}
 
 
@@ -556,7 +581,7 @@ async def auth_switch_account(request: Request, response: Response, payload: dic
     delete_auth_session(request.cookies.get("stack_up_session"))
     session_token = secrets.token_urlsafe(32)
     create_auth_session(account["user_id"], session_token)
-    set_auth_cookies(response, session_token, device_token)
+    set_auth_cookies(response, session_token, device_token, request)
     return {
         "status": "success",
         "account": {
