@@ -15,6 +15,16 @@ export function sumAllBankTransactions(transactions) {
   }, { income: 0, expenses: 0 });
 }
 
+export function calculateBalanceRemaining({
+  openingBalance,
+  income,
+  expenses,
+}) {
+  return (Number(openingBalance) || 0) +
+    (Number(income) || 0) -
+    (Number(expenses) || 0);
+}
+
 function dayNumber(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""))) return null;
   const [year, month, day] = value.split("-").map(Number);

@@ -2529,6 +2529,93 @@ font-size: 11px;
 line-height: 1.7;
 }
 
+.all-money-out-calculation {
+gap: 18px;
+padding: 22px;
+border-color: #315a43;
+background:
+radial-gradient(ellipse at 92% 4%, rgba(72, 219, 142, 0.13), transparent 38%),
+linear-gradient(135deg, #111b15, #0b120e 72%);
+}
+
+.money-flow-headline {
+display: flex;
+align-items: flex-end;
+justify-content: space-between;
+gap: 18px;
+}
+
+.money-flow-headline > div {
+display: grid;
+gap: 6px;
+}
+
+.money-flow-headline > div:last-child {
+text-align: right;
+}
+
+.money-flow-headline span,
+.money-flow-equation span {
+color: #91a397;
+font-size: 10px;
+font-weight: 700;
+letter-spacing: 0.8px;
+text-transform: uppercase;
+}
+
+.money-flow-headline strong {
+color: #eef8f0;
+font-size: clamp(23px, 3vw, 32px);
+}
+
+.money-flow-headline > div:last-child strong {
+color: #72e6a4;
+}
+
+.money-flow-equation {
+display: grid;
+grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.15fr);
+align-items: center;
+gap: 12px;
+padding: 16px;
+border: 1px solid rgba(117, 159, 130, 0.22);
+border-radius: 12px;
+background: rgba(5, 11, 7, 0.5);
+}
+
+.money-flow-equation > div {
+display: grid;
+gap: 7px;
+min-width: 0;
+}
+
+.money-flow-equation strong {
+overflow-wrap: anywhere;
+color: #e9f2eb;
+font-size: clamp(14px, 1.7vw, 19px);
+}
+
+.money-flow-equation > b {
+color: #74dda0;
+font-size: 18px;
+text-align: center;
+}
+
+.money-flow-equation .money-flow-result {
+padding: 10px 12px;
+border: 1px solid rgba(98, 230, 167, 0.34);
+border-radius: 9px;
+background: rgba(38, 101, 64, 0.22);
+}
+
+.money-flow-equation .money-flow-result span {
+color: #a5d8b5;
+}
+
+.money-flow-equation .money-flow-result strong {
+color: #72e6a4;
+}
+
 .expense-view-switch {
 display: grid;
 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3323,6 +3410,25 @@ padding: 18px 14px;
 .metric-filter-grid,
 .transaction-filter-grid {
 grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.all-money-out-calculation {
+padding: 17px 14px;
+}
+
+.money-flow-equation {
+display: flex;
+flex-wrap: wrap;
+gap: 11px;
+padding: 12px;
+}
+
+.money-flow-equation > div {
+flex: 1 1 125px;
+}
+
+.money-flow-equation .money-flow-result {
+flex-basis: 100%;
 }
 
 .transaction-table-wrap .main-transactions-table,
@@ -4590,6 +4696,46 @@ background: #edf8ef;
 }
 
 :root[data-theme="light"] .expense-view-switch button.active span {
+color: #39744c;
+}
+
+:root[data-theme="light"] .all-money-out-calculation {
+border-color: #b4d7bf;
+background:
+radial-gradient(ellipse at 92% 4%, rgba(73, 177, 106, 0.12), transparent 38%),
+linear-gradient(135deg, #f7fcf8, #eff7f1 72%);
+}
+
+:root[data-theme="light"] .money-flow-headline span,
+:root[data-theme="light"] .money-flow-equation span {
+color: #526b59;
+}
+
+:root[data-theme="light"] .money-flow-headline strong,
+:root[data-theme="light"] .money-flow-equation strong {
+color: #243d2c;
+}
+
+:root[data-theme="light"] .money-flow-headline > div:last-child strong,
+:root[data-theme="light"] .money-flow-equation .money-flow-result strong {
+color: #19733f;
+}
+
+:root[data-theme="light"] .money-flow-equation {
+border-color: #d2e4d6;
+background: rgba(255, 255, 255, 0.72);
+}
+
+:root[data-theme="light"] .money-flow-equation > b {
+color: #398b55;
+}
+
+:root[data-theme="light"] .money-flow-equation .money-flow-result {
+border-color: #a9d4b5;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .money-flow-equation .money-flow-result span {
 color: #39744c;
 }
 

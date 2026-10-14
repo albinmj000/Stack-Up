@@ -27,6 +27,7 @@ import stackUpLogo from "./assets/stackup-logo.svg";
 import stackUpLightLogo from "./assets/stackup-logo-light.svg";
 import { API, readApiResponse } from "./api";
 import {
+  calculateBalanceRemaining,
   calculateSpendingLimiter,
   sumAllBankTransactions,
 } from "./spendingLimiter";
@@ -1357,8 +1358,11 @@ function App() {
     displayAnalysis?.category_totals ?? {}
   ).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
   const allBankTransactionTotals = sumAllBankTransactions(displayTransactions);
-  const balanceAfterAllMoneyOut =
-    allBankTransactionTotals.income - allBankTransactionTotals.expenses;
+  const balanceAfterAllMoneyOut = calculateBalanceRemaining({
+    openingBalance,
+    income: allBankTransactionTotals.income,
+    expenses: allBankTransactionTotals.expenses,
+  });
   const useAllTransactionsForLimiter = spendingLimiterMode === "all-transactions";
   const limiterIncome = useAllTransactionsForLimiter
     ? allBankTransactionTotals.income
@@ -3074,11 +3078,52 @@ function App() {
                   </div>
                 )}
 
-                <section className="panel metric-calculation">
-                  <span>Calculation</span>
-                  <strong>{metricDetail.value}</strong>
-                  <p>{metricDetail.formula}</p>
-                  <small>{metricDetail.explanation}</small>
+                <section className={`panel metric-calculation ${selectedMetric === "total_expenses" && expenseViewMode === "all-money-out" ? "all-money-out-calculation" : ""}`}>
+                  {selectedMetric === "total_expenses" && expenseViewMode === "all-money-out" ? (
+                    <>
+                      <div className="money-flow-headline">
+                        <div>
+                          <span>ALL MONEY OUT</span>
+                          <strong>{money(allBankTransactionTotals.expenses)}</strong>
+                        </div>
+                        <div>
+                          <span>BALANCE REMAINING</span>
+                          <strong>{money(balanceAfterAllMoneyOut)}</strong>
+                        </div>
+                      </div>
+                      <div className="money-flow-equation" aria-label={`All money in ${money(allBankTransactionTotals.income)} plus opening balance ${money(openingBalance ?? 0)} minus all money debited ${money(allBankTransactionTotals.expenses)} equals balance remaining ${money(balanceAfterAllMoneyOut)}`}>
+                        <div>
+                          <span>All money in</span>
+                          <strong>{money(allBankTransactionTotals.income)}</strong>
+                        </div>
+                        <b>+</b>
+                        <div>
+                          <span>Opening balance</span>
+                          <strong>{money(openingBalance ?? 0)}</strong>
+                        </div>
+                        <b>−</b>
+                        <div>
+                          <span>All money debited</span>
+                          <strong>{money(allBankTransactionTotals.expenses)}</strong>
+                        </div>
+                        <b>=</b>
+                        <div className="money-flow-result">
+                          <span>Balance remaining</span>
+                          <strong>{money(balanceAfterAllMoneyOut)}</strong>
+                        </div>
+                      </div>
+                      {openingBalance === null && (
+                        <small>Opening balance could not be read from the selected statement(s), so ₹0 is used.</small>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span>Calculation</span>
+                      <strong>{metricDetail.value}</strong>
+                      <p>{metricDetail.formula}</p>
+                      <small>{metricDetail.explanation}</small>
+                    </>
+                  )}
                 </section>
 
                 {selectedMetric === "total_income" && (

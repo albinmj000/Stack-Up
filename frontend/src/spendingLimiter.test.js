@@ -2,9 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  calculateBalanceRemaining,
   calculateSpendingLimiter,
   sumAllBankTransactions,
 } from "./spendingLimiter.js";
+
+test("remaining balance adds opening balance and all credits before subtracting all debits", () => {
+  assert.equal(calculateBalanceRemaining({
+    openingBalance: 5000,
+    income: 12000,
+    expenses: 8500,
+  }), 8500);
+});
+
+test("remaining balance uses zero when opening balance is unavailable", () => {
+  assert.equal(calculateBalanceRemaining({
+    openingBalance: null,
+    income: 12000,
+    expenses: 8500,
+  }), 3500);
+});
 
 test("spending allowance uses income, opening balance, counted expenses and savings", () => {
   const result = calculateSpendingLimiter({
