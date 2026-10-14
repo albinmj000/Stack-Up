@@ -2898,11 +2898,11 @@ function App() {
                   <table className="main-transactions-table">
                     <thead>
                       <tr>
-                        <th>CATEGORY</th>
-                        <th>TRANSACTION DETAILS</th>
-                        <th>TYPE</th>
                         <th>DATE</th>
+                        <th>CATEGORY</th>
+                        <th>TYPE</th>
                         <th className="amount-column">AMOUNT</th>
+                        <th>TRANSACTION DETAILS</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2911,6 +2911,9 @@ function App() {
                         const amountDirection = getAmountDirection(transaction);
                         return (
                           <tr key={transaction.id ?? `${getTransactionName(transaction)}-${index}`}>
+                            <td className="date-cell">
+                              {formatDate(transaction.date ?? transaction.transaction_date)}
+                            </td>
                             <td>
                               <label className="category-editor">
                                 <span className="sr-only">Choose category for {getTransactionName(transaction)}</span>
@@ -2928,6 +2931,10 @@ function App() {
                                 </select>
                               </label>
                             </td>
+                            <td className="date-cell">{getTransactionFilterType(transaction)}</td>
+                            <td className={`amount-cell ${amountDirection}`}>
+                              {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}
+                            </td>
                             <td>
                               <div className="transaction-name">
                                 <span className={`transaction-symbol ${type}`}>
@@ -2935,13 +2942,6 @@ function App() {
                                 </span>
                                 <strong>{getTransactionName(transaction)}</strong>
                               </div>
-                            </td>
-                            <td className="date-cell">{getTransactionFilterType(transaction)}</td>
-                            <td className="date-cell">
-                              {formatDate(transaction.date ?? transaction.transaction_date)}
-                            </td>
-                            <td className={`amount-cell ${amountDirection}`}>
-                              {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}
                             </td>
                           </tr>
                         );
