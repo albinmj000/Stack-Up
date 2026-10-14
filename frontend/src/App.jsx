@@ -1357,6 +1357,8 @@ function App() {
     displayAnalysis?.category_totals ?? {}
   ).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
   const allBankTransactionTotals = sumAllBankTransactions(displayTransactions);
+  const balanceAfterAllMoneyOut =
+    allBankTransactionTotals.income - allBankTransactionTotals.expenses;
   const useAllTransactionsForLimiter = spendingLimiterMode === "all-transactions";
   const limiterIncome = useAllTransactionsForLimiter
     ? allBankTransactionTotals.income
@@ -1643,7 +1645,7 @@ function App() {
       title: expenseViewMode === "all-money-out" ? "Total money out" : "Expenses",
       value: money(expenseView.total),
       formula: expenseViewMode === "all-money-out"
-        ? `Sum of ${expenseView.transactions.length} debit transactions, including transfers = ${money(expenseView.total)}`
+        ? `All money in (${money(allBankTransactionTotals.income)}) − all money out (${money(expenseView.total)}) = balance remaining (${money(balanceAfterAllMoneyOut)})`
         : `Sum of ${expenseView.transactions.length} expenses, excluding transfers = ${money(expenseView.total)}`,
       explanation: expenseViewMode === "all-money-out"
         ? "Includes every debit transaction, including transfers, UPI sent, and other debit rows. Shared-bill payments use the full amount that left your bank account."
