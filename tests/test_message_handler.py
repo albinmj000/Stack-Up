@@ -375,6 +375,43 @@ class MessageHandlerTests(unittest.TestCase):
         )
 
     @patch.object(message_handler, "get_user_transactions")
+    @patch.object(message_handler, "understand_financial_question")
+    def test_monthly_savings_question_receives_account_transactions(
+        self, understand, get_transactions
+    ):
+        account_transactions = [
+            {
+                "amount": 12000,
+                "type": "credit",
+                "transaction_type": "income",
+                "category": "Income",
+            },
+            {
+                "amount": 5000,
+                "type": "debit",
+                "transaction_type": "expense",
+                "category": "Bills & Utilities",
+            },
+        ]
+        get_transactions.return_value = account_transactions
+        understand.return_value = {
+            "intent": "general",
+            "category": None,
+            "answer": "Your saved transactions can help estimate that.",
+        }
+
+        result = message_handler.handle_user_message(
+            "user-1",
+            "Will I be able to save 6000 monthly according to expenses?",
+        )
+
+        self.assertEqual(result["type"], "ai_answer")
+        self.assertEqual(
+            understand.call_args.args[1],
+            account_transactions,
+        )
+
+    @patch.object(message_handler, "get_user_transactions")
     def test_largest_expense_question_returns_sorted_rows_and_excludes_transfers(
         self, get_transactions
     ):

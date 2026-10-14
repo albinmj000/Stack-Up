@@ -589,15 +589,14 @@ def handle_user_message(
     if emi_result is not None:
         return emi_result
 
-    use_statement_data = statement_data_is_relevant(
-        message_lower,
-        history,
+    budget_planning_question = is_budget_planning_question(message_lower)
+    use_statement_data = budget_planning_question or statement_data_is_relevant(
+        message_lower, history
     )
     assistant_transactions = transactions if use_statement_data else []
 
     # Budget-planning questions need the AI to understand the whole request
     # before words like "income" or "expenses" can trigger category shortcuts.
-    budget_planning_question = is_budget_planning_question(message_lower)
     if budget_planning_question:
         try:
             understood = understand_financial_question(
