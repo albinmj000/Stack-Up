@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Stack Up</string>
+    <string name="title_activity_main">Stack Up</string>
+    <string name="package_name">app.stackupfinance.site</string>
+    <string name="custom_url_scheme">app.stackupfinance.site</string>
+</resources>

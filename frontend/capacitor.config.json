@@ -1,0 +1,9 @@
+{
+  "appId": "app.stackupfinance.site",
+  "appName": "Stack Up",
+  "webDir": "dist",
+  "server": {
+    "iosScheme": "https",
+    "androidScheme": "https"
+  }
+}

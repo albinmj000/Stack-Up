@@ -9,39 +9,39 @@ AI request scoping, CORS/configuration, and existing tests.
 
 | # | Severity | File | Lines | Finding | Confidence |
 |---|----------|------|-------|---------|------------|
-| 1 | Medium | `frontend/vite.config.js` | 5–10 | Mobile builds require a non-empty `VITE_API_BASE_URL`, but do not validate that it uses HTTPS. Since authenticated API requests use credentials, an accidentally configured HTTP base URL could expose login and financial traffic in transit. The mobile URL inspected during this review used HTTPS; this is a conditional build-configuration risk, not evidence that current traffic uses HTTP. | 8/10 |
+| 1 | Medium — fixed | `frontend/mobileApiUrl.js` | 1–27 | Mobile builds now require an absolute HTTPS API URL and reject malformed/relative URLs, credentials, query strings, and fragments. Regression tests cover accepted and rejected values. | 8/10 |
 
-## Isolation test coverage gap
+## User-data isolation tests added
 
-Existing database tests exercise some user-scoped helpers, but the review did
-not find route-level tests proving with two separate users that one account
-cannot read or modify the other account's records by supplying its record IDs.
-The review also did not find an AI-context isolation test proving that one
-user's Assistant request cannot include another user's statements or
-transactions.
+`tests/test_user_data_isolation_api.py` creates two users in a temporary
+database and exercises the FastAPI routes with separate session tokens. It
+checks account/profile listing and account switching, statement and transaction
+reads/deletes, bank-account assignment, upload bank-account selection,
+category and income-inclusion updates, and foreign statement IDs on `/message`.
+It also verifies that an Assistant request as User A passes only User A's
+transactions into its AI context.
 
-This is a test-coverage gap, not a confirmed cross-user access vulnerability.
-The static review did not establish a confirmed user-data isolation bypass.
-This review is not a security certification.
+These tests passed for the covered routes and fixture cases. They did not
+establish or test every route, every authentication lifecycle, production
+database configuration, or deployment settings; this report is not a security
+certification.
 
-## Recommended remediation and verification
+## Remediation and verification
 
-1. Validate `VITE_API_BASE_URL` during mobile builds as an absolute HTTPS URL.
-   Add configuration tests proving HTTPS passes and HTTP, malformed, and
-   non-absolute values fail.
-2. Add route-level tests using separate users A and B. Authenticate as A and
-   attempt to access B's statements, statement contents, transactions,
-   category/income updates, bank-account assignment, and message requests with
-   B's statement IDs. Verify requests are rejected and B's data is unchanged.
-3. Add an Assistant scoping test with distinct financial fixtures for A and B.
-   Verify B's statement IDs cannot be used by A and B's transaction details
-   are never passed into A's AI request context.
-4. Run the relevant tests against the actual route and database setup before
-   claiming the isolation controls have been verified.
+1. `npm test` — **15 passed**, including mobile API URL validation.
+2. `python -m unittest discover -s tests` — **98 passed**, including the
+   two-user route and AI-context tests.
+3. `npm run build:mobile` and `npm run cap:sync` — **passed**.
+4. `npm run build` — **passed**.
+5. `npm run lint` — **0 errors**; one pre-existing React hook dependency
+   warning remains in `frontend/src/App.jsx`.
+6. The mobile URL validator was also checked by invoking a mobile build with
+   an HTTP API URL; the build rejected it as expected.
 
 ## Limitations
 
-This was a static, read-only review. No source files were changed during the
-audit, and no tests were added or run. The findings above are limited to the
-evidence inspected; absence of a confirmed bypass is not proof that all routes
-or deployment configurations are secure.
+This follow-up fixed the reported mobile URL validation issue and added
+automated isolation tests; it did not alter production settings or deploy the
+application. Review the authentication, upload validation, secrets/logging,
+CORS, and production environment independently before making any broader
+security claim.

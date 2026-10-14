@@ -553,6 +553,43 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in result["transactions"]], [1])
 
     @patch.object(message_handler, "get_user_transactions")
+    def test_how_much_did_i_spend_in_merchant_returns_debit_sum(
+        self, get_transactions
+    ):
+        get_transactions.return_value = [
+            {
+                "id": 1,
+                "description": "UPI/P2M/111/Thalassery Food Court/UPI/BANK",
+                "amount": 350,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 2,
+                "description": "UPI/P2M/222/Thalassery Food Court/UPI/BANK",
+                "amount": 150,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 3,
+                "description": "UPI/P2A/333/Thalassery Food Court/UPI/BANK",
+                "amount": 500,
+                "type": "credit",
+                "transaction_type": "income",
+            },
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1", "How much did I spend in Thalassery?"
+        )
+
+        self.assertEqual(result["type"], "transaction_search")
+        self.assertEqual(result["data"]["spent_total"], 500)
+        self.assertEqual(result["data"]["debit_count"], 2)
+        self.assertEqual(result["data"]["transaction_count"], 3)
+
+    @patch.object(message_handler, "get_user_transactions")
     def test_follow_up_lists_matching_transactions_for_previous_counterparty(
         self, get_transactions
     ):
