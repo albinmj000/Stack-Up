@@ -1,6 +1,7 @@
 import re
 import logging
 import unicodedata
+from difflib import SequenceMatcher
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -17,7 +18,7 @@ from services.ai_assistant import (
     understand_financial_question,
 )
 from database.database import get_statement_transactions, get_user_transactions
-from services.transaction_processor import rule_based_category
+from services.transaction_processor import extract_counterparty, rule_based_category
 
 
 CATEGORY_ALIASES = {
@@ -57,6 +58,15 @@ CATEGORY_ALIASES = {
 }
 
 logger = logging.getLogger(__name__)
+
+TRANSACTION_ENTITY_STOPWORDS = {
+    "a", "an", "and", "at", "bank", "bill", "court", "did", "for",
+    "expense", "expenses", "from", "how", "i", "in", "me", "my", "of",
+    "on", "or", "paid", "payment", "payments", "restaurant",
+    "restaurants", "restaurent", "sender", "shop", "spend", "spending",
+    "spent", "store", "the", "to", "total", "transaction", "transactions",
+    "upi", "with",
+}
 
 
 def detect_category(message):
@@ -100,6 +110,96 @@ def requested_transaction_limit(message, default=10):
     if not match:
         return default
     return min(50, max(1, int(match.group(1))))
+
+
+def _transaction_entity_from_message(message):
+    text = str(message or "").strip()
+    patterns = (
+        r"\b(?:spend|spent|spending|expense|expenses|cost|paid|pay)\b"
+        r".*\b(?:at|in|on|to|from|with|for)\s+([^?.!,;]+)",
+        r"\b(?:show|list|find|search)\b.*\b(?:transactions?|payments?)\b"
+        r".*\b(?:to|from|with|for|at|by|of)\s+([^?.!,;]+)",
+        r"\b(?:transactions?|payments?)\s+(?:to|from|with|for|at|by|of)\s+"
+        r"([^?.!,;]+)",
+    )
+    target = None
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            target = match.group(1).strip()
+            break
+    if not target:
+        return None
+
+    target = re.sub(
+        r"\b(?:this|last|past|previous|current)\s+"
+        r"(?:week|month|year|quarter|statement)\b.*$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" \t\n.,!?;:")
+    if re.search(r"\b(?:that|those|same|them|there)\b", target, re.IGNORECASE):
+        return None
+
+    tokens = _transaction_entity_tokens(target)
+    if not tokens or target.casefold() in CATEGORY_ALIASES:
+        return None
+    return target
+
+
+def _transaction_entity_tokens(value):
+    tokens = re.findall(r"[a-z0-9]+", str(value or "").casefold())
+    return [
+        token for token in tokens
+        if token not in TRANSACTION_ENTITY_STOPWORDS and len(token) > 1
+    ]
+
+
+def _transaction_matches_entity(transaction, entity):
+    entity_tokens = _transaction_entity_tokens(entity)
+    if not entity_tokens:
+        return False
+
+    candidates = [
+        transaction.get("description"),
+        transaction.get("reference"),
+    ]
+    description = str(transaction.get("description") or "")
+    if re.search(r"\bupi\b", description, re.IGNORECASE):
+        candidates.append(extract_counterparty(description))
+
+    candidate_tokens = {
+        token
+        for candidate in candidates
+        for token in _transaction_entity_tokens(candidate)
+    }
+    if not candidate_tokens:
+        return False
+
+    matched = 0
+    for query_token in entity_tokens:
+        if any(
+            query_token == candidate_token
+            or (
+                len(query_token) >= 4
+                and len(candidate_token) >= 4
+                and SequenceMatcher(None, query_token, candidate_token).ratio() >= 0.76
+            )
+            for candidate_token in candidate_tokens
+        ):
+            matched += 1
+
+    return matched >= max(1, (len(entity_tokens) + 1) // 2)
+
+
+def _transaction_entity_from_history(history):
+    for turn in reversed(history):
+        if turn["role"] != "user":
+            continue
+        entity = _transaction_entity_from_message(turn["text"])
+        if entity:
+            return entity
+    return None
 
 
 def transaction_totals(transactions):
@@ -512,6 +612,72 @@ def handle_user_message(
                 "Ask Stack Up request failed (%s).", type(error).__name__
             )
             return _model_failure(_model_error_message(error))
+
+    # Merchant/counterparty totals and row lookup must be calculated from
+    # saved statement rows rather than estimated by the language model.
+    entity = _transaction_entity_from_message(message)
+    is_transaction_lookup = bool(re.search(
+        r"\b(?:transaction|transactions|payment|payments|sender|receiver|upi)\b",
+        message_lower,
+    ))
+    if entity is None and is_transaction_lookup:
+        entity = _transaction_entity_from_history(history)
+    if entity:
+        matches = [
+            transaction for transaction in assistant_transactions
+            if _transaction_matches_entity(transaction, entity)
+        ]
+        matches.sort(
+            key=lambda transaction: (
+                _normalized_transaction_date(
+                    transaction.get("date") or transaction.get("transaction_date")
+                ) or "",
+                str(transaction.get("id") or ""),
+            ),
+            reverse=True,
+        )
+        debit_transactions = [
+            transaction for transaction in matches
+            if str(transaction.get("type") or "").casefold() == "debit"
+        ]
+        spent_total = round(sum(
+            get_expense_amount(transaction)
+            for transaction in debit_transactions
+        ), 2)
+        if not matches:
+            return {
+                "type": "transaction_search",
+                "message": (
+                    f"I couldn't find transactions matching “{entity}” "
+                    "in the selected statement(s)."
+                ),
+                "entity": entity,
+                "transactions": [],
+                "data": {
+                    "entity": entity,
+                    "transaction_count": 0,
+                    "debit_count": 0,
+                    "spent_total": 0,
+                },
+            }
+
+        return {
+            "type": "transaction_search",
+            "message": (
+                f"You spent ₹{spent_total:,.2f} across "
+                f"{len(debit_transactions)} debit transaction(s) matching "
+                f"“{entity}”. Here are all {len(matches)} matching transactions; "
+                "the total counts debits only."
+            ),
+            "entity": entity,
+            "transactions": matches,
+            "data": {
+                "entity": entity,
+                "transaction_count": len(matches),
+                "debit_count": len(debit_transactions),
+                "spent_total": spent_total,
+            },
+        }
 
     # 2. Transaction count
     count_phrases = [

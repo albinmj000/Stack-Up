@@ -432,6 +432,100 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(result["type"], "category_transactions")
         self.assertEqual(len(result["transactions"]), 2)
 
+    @patch.object(message_handler, "understand_financial_question")
+    @patch.object(message_handler, "get_user_transactions")
+    def test_merchant_spend_question_returns_exact_rows_and_debit_total(
+        self, get_transactions, understand
+    ):
+        get_transactions.return_value = [
+            {
+                "id": 1,
+                "date": "12-09-2026",
+                "description": "UPI/P2M/111/Thalassery Food Court/UPI/BANK",
+                "amount": 350,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 2,
+                "date": "13-09-2026",
+                "description": "UPI/P2M/222/Thalassery Food Court/UPI/BANK",
+                "amount": 150,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 3,
+                "date": "14-09-2026",
+                "description": "UPI/P2A/333/Thalassery Food Court/UPI/BANK",
+                "amount": 500,
+                "type": "credit",
+                "transaction_type": "income",
+            },
+            {
+                "id": 4,
+                "description": "UPI/P2M/444/Other Restaurant/UPI/BANK",
+                "amount": 900,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1",
+            "How much did I totally spend in Thalasseri restaurant?",
+        )
+
+        self.assertEqual(result["type"], "transaction_search")
+        self.assertEqual(result["data"]["spent_total"], 500)
+        self.assertEqual(result["data"]["debit_count"], 2)
+        self.assertEqual(result["data"]["transaction_count"], 3)
+        self.assertEqual(
+            [row["id"] for row in result["transactions"]],
+            [3, 2, 1],
+        )
+        understand.assert_not_called()
+
+    @patch.object(message_handler, "get_user_transactions")
+    def test_follow_up_lists_matching_transactions_for_previous_counterparty(
+        self, get_transactions
+    ):
+        get_transactions.return_value = [
+            {
+                "id": 1,
+                "description": "UPI/P2M/111/Thalassery Food Court/UPI/BANK",
+                "amount": 350,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 2,
+                "description": "UPI/P2M/222/Thalassery Food Court/UPI/BANK",
+                "amount": 150,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1",
+            "Show all transactions to that UPI sender",
+            history=[
+                {
+                    "role": "user",
+                    "text": "How much did I spend at Thalasseri restaurant?",
+                },
+                {
+                    "role": "assistant",
+                    "text": "You spent ₹500 at Thalassery Food Court.",
+                },
+            ],
+        )
+
+        self.assertEqual(result["type"], "transaction_search")
+        self.assertEqual([row["id"] for row in result["transactions"]], [2, 1])
+        self.assertEqual(result["data"]["spent_total"], 500)
+
     @patch.object(message_handler, "get_user_transactions")
     def test_statement_summary_question(self, get_transactions):
         get_transactions.return_value = [
