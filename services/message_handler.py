@@ -589,9 +589,22 @@ def handle_user_message(
     if emi_result is not None:
         return emi_result
 
+    entity = _transaction_entity_from_message(message)
+    is_transaction_lookup = bool(re.search(
+        r"\b(?:transaction|transactions|payment|payments|sender|receiver|upi)\b",
+        message_lower,
+    ))
+    refers_to_previous_entity = bool(
+        re.search(r"\b(?:that|those|same|them|there)\b", message_lower)
+    )
+    if entity is None and is_transaction_lookup and refers_to_previous_entity:
+        entity = _transaction_entity_from_history(history)
+
     budget_planning_question = is_budget_planning_question(message_lower)
-    use_statement_data = budget_planning_question or statement_data_is_relevant(
-        message_lower, history
+    use_statement_data = (
+        budget_planning_question
+        or entity is not None
+        or statement_data_is_relevant(message_lower, history)
     )
     assistant_transactions = transactions if use_statement_data else []
 
@@ -614,16 +627,6 @@ def handle_user_message(
 
     # Merchant/counterparty totals and row lookup must be calculated from
     # saved statement rows rather than estimated by the language model.
-    entity = _transaction_entity_from_message(message)
-    is_transaction_lookup = bool(re.search(
-        r"\b(?:transaction|transactions|payment|payments|sender|receiver|upi)\b",
-        message_lower,
-    ))
-    refers_to_previous_entity = bool(
-        re.search(r"\b(?:that|those|same|them|there)\b", message_lower)
-    )
-    if entity is None and is_transaction_lookup and refers_to_previous_entity:
-        entity = _transaction_entity_from_history(history)
     if entity:
         matches = [
             transaction for transaction in assistant_transactions

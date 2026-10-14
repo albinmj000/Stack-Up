@@ -524,6 +524,35 @@ class MessageHandlerTests(unittest.TestCase):
         understand.assert_not_called()
 
     @patch.object(message_handler, "get_user_transactions")
+    def test_short_merchant_spend_question_searches_account_transactions(
+        self, get_transactions
+    ):
+        get_transactions.return_value = [
+            {
+                "id": 1,
+                "description": "UPI/P2M/111/Thalassery Food Court/UPI/BANK",
+                "amount": 180,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 2,
+                "description": "UPI/P2M/222/Other Restaurant/UPI/BANK",
+                "amount": 400,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1", "how much spend in thalassery"
+        )
+
+        self.assertEqual(result["type"], "transaction_search")
+        self.assertEqual(result["data"]["spent_total"], 180)
+        self.assertEqual([row["id"] for row in result["transactions"]], [1])
+
+    @patch.object(message_handler, "get_user_transactions")
     def test_follow_up_lists_matching_transactions_for_previous_counterparty(
         self, get_transactions
     ):
