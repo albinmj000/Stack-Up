@@ -2529,6 +2529,44 @@ font-size: 11px;
 line-height: 1.7;
 }
 
+.expense-view-switch {
+display: grid;
+grid-template-columns: repeat(2, minmax(0, 1fr));
+gap: 8px;
+margin-bottom: 14px;
+}
+
+.expense-view-switch button {
+display: grid;
+gap: 4px;
+min-height: 58px;
+padding: 10px 14px;
+border: 1px solid #293b2f;
+border-radius: 9px;
+color: #b9c7bd;
+text-align: left;
+background: #0c130e;
+}
+
+.expense-view-switch button.active {
+border-color: #62e6a7;
+color: #e7f8ec;
+background: #14271b;
+}
+
+.expense-view-switch button strong {
+font-size: 12px;
+}
+
+.expense-view-switch button span {
+color: #829087;
+font-size: 10px;
+}
+
+.expense-view-switch button.active span {
+color: #a6d8b4;
+}
+
 .income-choice-panel {
 display: grid;
 gap: 14px;
@@ -4537,6 +4575,22 @@ box-shadow: 0 24px 90px rgba(22, 52, 32, 0.24);
 border-color: #d4e0d7;
 color: #263b2d;
 background: #ffffff;
+}
+
+:root[data-theme="light"] .expense-view-switch button {
+border-color: #d4e0d7;
+color: #405648;
+background: #ffffff;
+}
+
+:root[data-theme="light"] .expense-view-switch button.active {
+border-color: #70b985;
+color: #17693a;
+background: #edf8ef;
+}
+
+:root[data-theme="light"] .expense-view-switch button.active span {
+color: #39744c;
 }
 
 :root[data-theme="light"] .category-detail-layout,

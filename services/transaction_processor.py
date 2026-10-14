@@ -142,9 +142,20 @@ def upi_transfer_category(transaction):
     """Label a person-to-person UPI transfer using its bank direction."""
     direction = str(transaction.get("type") or "").lower().strip()
     description = str(transaction.get("description") or "")
-    if direction == "credit" or re.search(r"\b(?:CR|CREDIT)\b", description, re.IGNORECASE):
+    if direction == "credit":
+        return "UPI Received"
+    if direction == "debit":
+        return "UPI Sent"
+    if re.search(r"\b(?:CR|CREDIT)\b", description, re.IGNORECASE):
         return "UPI Received"
     return "UPI Sent"
+
+
+def normalize_upi_category(transaction, category):
+    """Keep UPI sent/received labels aligned with each row's bank direction."""
+    if category in ("UPI Sent", "UPI Received"):
+        return upi_transfer_category(transaction)
+    return category
 
 
 def rule_based_category(transaction):
@@ -207,10 +218,14 @@ def rule_based_category(transaction):
 def determine_transaction_type(transaction, category):
     original_type = str(transaction.get("type") or "").lower().strip()
 
-    if category == "UPI Received":
-        return "income"
+    if category in ("UPI Received", "UPI Sent"):
+        if original_type == "credit":
+            return "income"
+        if original_type == "debit":
+            return "transfer"
+        return "unknown"
 
-    if category in ("Transfer", "UPI Sent"):
+    if category == "Transfer":
         return "transfer"
 
     if category == "Refund":
@@ -246,9 +261,10 @@ def categorize_transactions(transactions, user_id=None):
             )
 
             if correction:
-                category = correction["category"]
-                if category in ("UPI Sent", "UPI Received"):
-                    category = upi_transfer_category(transaction)
+                category = normalize_upi_category(
+                    transaction,
+                    correction["category"],
+                )
                 transaction["category"] = category
                 transaction["transaction_type"] = determine_transaction_type(
                     transaction, category
@@ -291,6 +307,10 @@ def categorize_transactions(transactions, user_id=None):
 
                 if ai_result:
                     ai_category = ai_result.get("category", "Other")
+                    ai_category = normalize_upi_category(
+                        transaction,
+                        ai_category,
+                    )
                     fallback_type = {
                         "debit": "expense",
                         "credit": "income",
@@ -305,9 +325,12 @@ def categorize_transactions(transactions, user_id=None):
                     elif original_type == "credit" and ai_type == "expense":
                         ai_type = "income"
 
-                    if ai_category == "UPI Received":
-                        ai_type = "income"
-                    elif ai_category in ("Transfer", "UPI Sent"):
+                    if ai_category in ("UPI Received", "UPI Sent"):
+                        ai_type = determine_transaction_type(
+                            transaction,
+                            ai_category,
+                        )
+                    elif ai_category == "Transfer":
                         ai_type = "transfer"
                     elif ai_category in ("Income", "Interest Income"):
                         ai_type = "income"

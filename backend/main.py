@@ -82,6 +82,7 @@ from database.database import (
 from services.transaction_processor import (
     determine_transaction_type,
     extract_counterparty,
+    normalize_upi_category,
     transactions_for_same_counterparty,
 )
 from database.corrections import save_correction, list_user_corrections
@@ -783,14 +784,14 @@ async def change_transaction_category(
         user_transactions,
         transaction,
     )
-    transaction_updates = [
-        (
+    transaction_updates = []
+    for item in matching_transactions:
+        item_category = normalize_upi_category(item, category)
+        transaction_updates.append((
             item["id"],
-            category,
-            determine_transaction_type(item, category),
-        )
-        for item in matching_transactions
-    ]
+            item_category,
+            determine_transaction_type(item, item_category),
+        ))
     updated_count = update_transaction_categories(user_id, transaction_updates)
     if updated_count == 0:
         return {"status": "error", "message": "Transaction could not be updated."}
@@ -806,8 +807,11 @@ async def change_transaction_category(
     statement_transactions = get_statement_transactions(user_id, statement_id)
     return {
         "status": "success",
-        "category": category,
-        "transaction_type": determine_transaction_type(transaction, category),
+        "category": normalize_upi_category(transaction, category),
+        "transaction_type": determine_transaction_type(
+            transaction,
+            normalize_upi_category(transaction, category),
+        ),
         "updated_count": updated_count,
         "updated_transaction_ids": [item[0] for item in transaction_updates],
         "updated_transaction_types": [

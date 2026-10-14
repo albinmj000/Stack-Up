@@ -30,6 +30,7 @@ import {
   calculateSpendingLimiter,
   sumAllBankTransactions,
 } from "./spendingLimiter";
+import { summarizeExpenseView } from "./expenseView";
 import AccountSettings from "./AccountSettings";
 import "./App.css";
 
@@ -104,23 +105,28 @@ function getCountedExpenseAmount(transaction) {
 }
 
 function getTransactionType(transaction) {
-  const text = `${transaction.type ?? ""} ${transaction.transaction_type ?? ""} ${transaction.category ?? ""}`.toLowerCase();
-  if (text.includes("income") || text.includes("credit") || text.includes("deposit")) {
+  const direction = String(transaction.type ?? "").toLowerCase();
+  if (direction === "credit") {
     return "income";
   }
+  if (direction === "debit") return "expense";
+  const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
+  if (transactionType === "income") return "income";
   return "expense";
 }
 
 function getTransactionFilterType(transaction) {
-  if (transaction.income_included) return "income";
-  if (getAnalyticsCategory(transaction) === "UPI Received") {
-    return "income";
+  const direction = String(transaction.type ?? "").toLowerCase();
+  const category = String(getAnalyticsCategory(transaction)).trim().toLowerCase();
+  if (category === "upi received" || category === "upi sent") {
+    if (direction === "credit") return "income";
+    if (direction === "debit") return "transfer";
   }
+  if (transaction.income_included && direction === "credit") return "income";
   const transactionType = String(transaction.transaction_type ?? "").toLowerCase();
   if (["income", "expense", "transfer", "unknown"].includes(transactionType)) {
     return transactionType;
   }
-  const direction = String(transaction.type ?? "").toLowerCase();
   if (direction === "credit") return "income";
   if (direction === "debit") return "expense";
   return "unknown";
@@ -414,6 +420,7 @@ function App() {
   const [aiStatementIds, setAiStatementIds] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState(null);
+  const [expenseViewMode, setExpenseViewMode] = useState("expenses-only");
   const [incomeInclusionBusyId, setIncomeInclusionBusyId] = useState(null);
   const [metricFilters, setMetricFilters] = useState({
     category: "all",
@@ -625,7 +632,7 @@ function App() {
       minAmount: "",
       maxAmount: "",
     });
-  }, [selectedMetric]);
+  }, [selectedMetric, expenseViewMode]);
 
   useEffect(() => {
     if (!selectedCategory) return undefined;
@@ -941,9 +948,11 @@ function App() {
       }
       setCombinedRefreshKey((current) => current + 1);
       setNotice(
-        result.updated_count > 1
-          ? `Category saved as ${category} for ${result.updated_count} transactions to ${result.counterparty}.`
-          : `Category saved as ${category}.`
+        result.updated_count > 1 && ["UPI Sent", "UPI Received"].includes(category)
+          ? `UPI activity for ${result.counterparty} was categorized by whether money was sent or received.`
+          : result.updated_count > 1
+            ? `Category saved as ${category} for ${result.updated_count} transactions to ${result.counterparty}.`
+            : `Category saved as ${result.category || category}.`
       );
     } catch (err) {
       setError(err.message);
@@ -1574,10 +1583,11 @@ function App() {
         )
       )
   );
+  const expenseView = summarizeExpenseView(displayTransactions, expenseViewMode);
   const selectedMetricTransactions = selectedMetric === "total_income"
     ? selectedIncomeTransactions
     : selectedMetric === "total_expenses"
-      ? expenseTransactions
+      ? expenseView.transactions
       : [...incomeTransactions, ...expenseTransactions].sort(
           (a, b) => (b.id ?? 0) - (a.id ?? 0)
         );
@@ -1592,7 +1602,10 @@ function App() {
         : transaction.transaction_type || getTransactionType(transaction)
     ).toLowerCase();
     const date = getTransactionDateKey(transaction.date ?? transaction.transaction_date);
-    const amount = getAmount(transaction);
+    const amount = selectedMetric === "total_expenses" &&
+      expenseViewMode === "expenses-only"
+      ? getCountedExpenseAmount(transaction)
+      : getAmount(transaction);
     return (
       (metricFilters.category === "all" || category === metricFilters.category) &&
       (metricFilters.type === "all" || type === metricFilters.type) &&
@@ -1620,10 +1633,14 @@ function App() {
       explanation: "UPI Received credits count only when selected. Shared-bill participant shares count as income when you mark them as received.",
     },
     total_expenses: {
-      title: "Total expenses",
-      value: money(totalExpenses),
-      formula: `Sum of ${expenseTransactions.length} expenses and outgoing non-UPI transfers = ${money(totalExpenses)}`,
-      explanation: "Expenses and outgoing non-UPI transfers are included. UPI Sent and UPI Received are tracked separately.",
+      title: expenseViewMode === "all-money-out" ? "Total money out" : "Expenses",
+      value: money(expenseView.total),
+      formula: expenseViewMode === "all-money-out"
+        ? `Sum of ${expenseView.transactions.length} debit transactions, including transfers = ${money(expenseView.total)}`
+        : `Sum of ${expenseView.transactions.length} expenses, excluding transfers = ${money(expenseView.total)}`,
+      explanation: expenseViewMode === "all-money-out"
+        ? "Includes every debit transaction, including transfers, UPI sent, and other debit rows. Shared-bill payments use the full amount that left your bank account."
+        : "Excludes transfers, UPI activity, and unclassified debits. Shared-bill expenses count only your share.",
     },
     savings_rate: {
       title: "Savings rate",
@@ -3023,6 +3040,29 @@ function App() {
                   </div>
                 </section>
 
+                {selectedMetric === "total_expenses" && (
+                  <div className="expense-view-switch" role="group" aria-label="Choose expense total">
+                    <button
+                      type="button"
+                      className={expenseViewMode === "expenses-only" ? "active" : ""}
+                      aria-pressed={expenseViewMode === "expenses-only"}
+                      onClick={() => setExpenseViewMode("expenses-only")}
+                    >
+                      <strong>Expenses only</strong>
+                      <span>Exclude transfers</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={expenseViewMode === "all-money-out" ? "active" : ""}
+                      aria-pressed={expenseViewMode === "all-money-out"}
+                      onClick={() => setExpenseViewMode("all-money-out")}
+                    >
+                      <strong>All money out</strong>
+                      <span>Include transfers</span>
+                    </button>
+                  </div>
+                )}
+
                 <section className="panel metric-calculation">
                   <span>Calculation</span>
                   <strong>{metricDetail.value}</strong>
@@ -3146,6 +3186,8 @@ function App() {
                           <option value="all">All types</option>
                           <option value="income">Income</option>
                           <option value="expense">Expense</option>
+                          <option value="transfer">Transfer</option>
+                          <option value="unknown">Unknown</option>
                         </select>
                       </label>
                       <label>
@@ -3217,7 +3259,21 @@ function App() {
                                 </td>
                                 <td className="date-cell">{formatDate(transaction.date)}</td>
                                 <td className={`amount-cell ${amountDirection}`}>
-                                  {amountDirection === "income" ? "+" : "−"}{money(getAmount(transaction))}
+                                  {amountDirection === "income" ? "+" : "−"}
+                                  {money(
+                                    selectedMetric === "total_expenses" &&
+                                      expenseViewMode === "expenses-only"
+                                      ? getCountedExpenseAmount(transaction)
+                                      : getAmount(transaction)
+                                  )}
+                                  {selectedMetric === "total_expenses" &&
+                                    expenseViewMode === "expenses-only" &&
+                                    transaction.shared_bill_owner_share != null &&
+                                    getCountedExpenseAmount(transaction) !== getAmount(transaction) && (
+                                      <small className="gross-shared-bill-amount">
+                                        Bank debit: {money(getAmount(transaction))}
+                                      </small>
+                                    )}
                                 </td>
                               </tr>
                             );
