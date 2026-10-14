@@ -619,7 +619,10 @@ def handle_user_message(
         r"\b(?:transaction|transactions|payment|payments|sender|receiver|upi)\b",
         message_lower,
     ))
-    if entity is None and is_transaction_lookup:
+    refers_to_previous_entity = bool(
+        re.search(r"\b(?:that|those|same|them|there)\b", message_lower)
+    )
+    if entity is None and is_transaction_lookup and refers_to_previous_entity:
         entity = _transaction_entity_from_history(history)
     if entity:
         matches = [

@@ -564,6 +564,48 @@ class MessageHandlerTests(unittest.TestCase):
         self.assertEqual(result["data"]["spent_total"], 500)
 
     @patch.object(message_handler, "get_user_transactions")
+    def test_explicit_category_transaction_list_does_not_reuse_old_merchant(
+        self, get_transactions
+    ):
+        get_transactions.return_value = [
+            {
+                "id": 1,
+                "category": "Shopping",
+                "description": "Clothing Store",
+                "amount": 1200,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+            {
+                "id": 2,
+                "category": "Food",
+                "description": "UPI/P2M/111/Thalassery Food Court/UPI/BANK",
+                "amount": 350,
+                "type": "debit",
+                "transaction_type": "expense",
+            },
+        ]
+
+        result = message_handler.handle_user_message(
+            "user-1",
+            "Show all Shopping transactions",
+            history=[
+                {
+                    "role": "user",
+                    "text": "How much did I spend at Thalassery restaurant?",
+                },
+                {
+                    "role": "assistant",
+                    "text": "You spent ₹350 at Thalassery Food Court.",
+                },
+            ],
+        )
+
+        self.assertEqual(result["type"], "category_transactions")
+        self.assertEqual(result["category"], "Shopping")
+        self.assertEqual([row["id"] for row in result["transactions"]], [1])
+
+    @patch.object(message_handler, "get_user_transactions")
     def test_statement_summary_question(self, get_transactions):
         get_transactions.return_value = [
             {"amount": 1000, "type": "credit", "transaction_type": "income", "category": "Income"},
