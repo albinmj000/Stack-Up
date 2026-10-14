@@ -31,6 +31,7 @@ import {
   sumAllBankTransactions,
 } from "./spendingLimiter";
 import { summarizeExpenseView } from "./expenseView";
+import { formatDate } from "./formatDate";
 import AccountSettings from "./AccountSettings";
 import "./App.css";
 
@@ -56,18 +57,6 @@ const money = (value) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(value) || 0);
-
-function formatDate(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? String(value)
-    : date.toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      });
-}
 
 function getTransactionDateKey(value) {
   const text = String(value ?? "").trim();
